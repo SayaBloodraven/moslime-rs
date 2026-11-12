@@ -12,6 +12,7 @@
 #   --tag vX.Y.Z    install a specific release (default: the newest, pre-releases included)
 #   --build         build from source instead of downloading the release (takes 10-20 min on a Pi 4)
 #   --service       also install a systemd service that starts at boot (you start it after pairing)
+#   --pair          start the pairing helper at the end without asking
 #   --kiosk         show the control page full-screen on the Pi's own (touch) screen, no desktop needed
 #   --dir PATH      install folder (default: ~/moslime-rs)
 #   --help
@@ -23,6 +24,7 @@ TAG=""
 BUILD=0
 SERVICE=0
 KIOSK=0
+PAIR=0
 
 usage() {
   cat <<'USAGE'
@@ -34,6 +36,7 @@ Options:
   --tag vX.Y.Z    install a specific release (default: the newest, pre-releases included)
   --build         build from source instead of downloading the release (10-20 min on a Pi 4)
   --service       also install a systemd service that starts at boot (you start it after pairing)
+  --pair          start the pairing helper at the end without asking
   --kiosk         show the control page full-screen on the Pi's own (touch) screen, no desktop needed
   --dir PATH      install folder (default: ~/moslime-rs)
   --help
@@ -49,6 +52,7 @@ while [ $# -gt 0 ]; do
     --build)   BUILD=1; shift ;;
     --service) SERVICE=1; shift ;;
     --kiosk)   KIOSK=1; shift ;;
+    --pair)    PAIR=1; shift ;;
     --dir)     [ $# -ge 2 ] || die "--dir needs a value"; DIR="$2"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *)         die "unknown option: $1 (try --help)" ;;
@@ -175,12 +179,27 @@ KIOSKRC
   fi
 fi
 
+if [ "$PAIR" -eq 0 ] && [ -r /dev/tty ]; then
+  printf '\nPair your pucks now? Turn them on first (double blue blink). [y/N] ' > /dev/tty
+  read -r ANS < /dev/tty || ANS=""
+  case "$ANS" in [yY]*) PAIR=1 ;; esac
+fi
+if [ "$PAIR" -eq 1 ]; then
+  say "Pairing your pucks"
+  if [ -r /dev/tty ]; then
+    "$DIR/moslime" --setup < /dev/tty || echo "Pairing did not finish. Run it again any time:  cd $DIR && ./moslime --setup"
+  else
+    "$DIR/moslime" --setup || echo "Pairing did not finish. Run it again any time:  cd $DIR && ./moslime --setup"
+  fi
+fi
+
 cat <<DONE
 
 Installed in: $DIR
 
 Next steps
-  1. Pair each puck (they must be on, double blue blink):
+  1. Pair the pucks the easy way:  cd "$DIR" && ./moslime --setup
+     (or by hand; the pucks must be on with a double blue blink:)
        bluetoothctl
        scan on                      # wait for the QM-SS1 devices
        pair  3C:38:F4:XX:XX:XX

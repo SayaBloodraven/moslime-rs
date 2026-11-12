@@ -43,6 +43,16 @@ Add `dtoverlay=disable-bt` to /boot/firmware/config.txt and reboot.
     cargo build --release --no-default-features
 
 ## 3. Pair the pucks (required on Linux)
+The easy way: with all pucks switched on, run
+
+    ./moslime --setup
+
+It finds your Bluetooth adapter (preferring a USB dongle over the Pi's built-in
+one), scans for the pucks, shows their printed IDs, pairs and trusts them,
+asks for your PC's IP and writes `config_six.json`. Running it again keeps the
+pucks it already saved and adds new ones. The manual steps below are there in
+case you prefer them or something goes wrong.
+
 The original moslime wiki says the pucks must be *paired* with the Pi first
 (this is why it works on Linux but not Windows). With all six pucks on
 (double blue blink):
