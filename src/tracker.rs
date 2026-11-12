@@ -30,6 +30,8 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const STALE_AFTER: Duration = Duration::from_secs(5);
 const BACKOFF_MIN: Duration = Duration::from_secs(1);
 const BACKOFF_MAX: Duration = Duration::from_secs(15);
+/// Cap for "puck not advertising / BlueZ busy" failures.
+const SOFT_BACKOFF_MAX: Duration = Duration::from_secs(4);
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum Status {
@@ -194,10 +196,16 @@ pub async fn run_tracker(ctx: TrackerCtx) {
         };
 
         // A session that lasted a while resets the backoff; quick failures grow it.
+        // A puck that simply isn't advertising right now (timeout / not seen /
+        // BlueZ busy) is worth retrying soon; real errors back off further.
+        let soft = reason.contains("timed out")
+            || reason.contains("In Progress")
+            || reason.contains("not seen");
+        let cap = if soft { SOFT_BACKOFF_MAX } else { BACKOFF_MAX };
         backoff = if was_streaming && started.elapsed() > Duration::from_secs(10) {
             BACKOFF_MIN
         } else {
-            (backoff * 2).min(BACKOFF_MAX)
+            (backoff * 2).min(cap)
         };
         ctx.note(format!("{reason} - retrying in {}s", backoff.as_secs()));
 
@@ -280,10 +288,17 @@ async fn session(ctx: &TrackerCtx, sock: &UdpSocket, pcounter: &mut u64) -> Resu
         }
     }
 
-    let connected = tokio::time::timeout(CONNECT_TIMEOUT, p.connect())
-        .await
-        .context("connect timed out")?;
+    let connected = match tokio::time::timeout(CONNECT_TIMEOUT, p.connect()).await {
+        Ok(r) => r,
+        Err(_) => {
+            // Cancel the attempt that BlueZ is still working on; otherwise the
+            // next try is answered with "In Progress" until BlueZ gives up itself.
+            let _ = p.disconnect().await;
+            return Err(anyhow!("connect timed out"));
+        }
+    };
     if let Err(e) = connected {
+        let _ = p.disconnect().await;
         // Ask Windows directly why, so the log says more than "Not connected".
         #[cfg(windows)]
         {
