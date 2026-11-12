@@ -186,10 +186,20 @@ if [ "$PAIR" -eq 0 ] && [ -r /dev/tty ]; then
 fi
 if [ "$PAIR" -eq 1 ]; then
   say "Pairing your pucks"
+  PAIRED=0
   if [ -r /dev/tty ]; then
-    "$DIR/moslime" --setup < /dev/tty || echo "Pairing did not finish. Run it again any time:  cd $DIR && ./moslime --setup"
+    "$DIR/moslime" --setup < /dev/tty && PAIRED=1
   else
-    "$DIR/moslime" --setup || echo "Pairing did not finish. Run it again any time:  cd $DIR && ./moslime --setup"
+    "$DIR/moslime" --setup && PAIRED=1
+  fi
+  if [ "$PAIRED" -eq 1 ]; then
+    if [ "$SERVICE" -eq 1 ]; then
+      say "Starting the bridge service"
+      sudo systemctl restart moslime
+      echo "Running. Logs: journalctl -u moslime -f"
+    fi
+  else
+    echo "Pairing did not finish. Run it again any time:  cd $DIR && ./moslime --setup"
   fi
 fi
 

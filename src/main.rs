@@ -53,6 +53,15 @@ fn main() -> Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     let has = |flag: &str| args.iter().any(|a| a == flag);
 
+    // Refuse unknown options instead of silently starting the bridge.
+    for a in &args {
+        if !["--headless", "--setup", "--list-adapters", "--help", "-h"].contains(&a.as_str()) {
+            eprintln!("Unknown option: {a}\n");
+            eprint!("{HELP}");
+            std::process::exit(2);
+        }
+    }
+
     if has("--help") || has("-h") {
         print!("{HELP}");
         return Ok(());
