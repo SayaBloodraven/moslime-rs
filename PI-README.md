@@ -114,7 +114,7 @@ Turn on console auto-login (`sudo raspi-config` -> System Options -> Boot / Auto
 Login -> Console Autologin), then add this to the end of `~/.bash_profile`:
 
     if [ "$(tty)" = /dev/tty1 ]; then
-      exec cage -s -- chromium --kiosk --noerrdialogs --disable-infobars http://localhost:8080
+      exec cage -s -- chromium --kiosk --noerrdialogs --disable-infobars 'http://localhost:8080/?kiosk=1'
     fi
 
 The bridge itself still runs from systemd (`moslime.service`). Don't also enable

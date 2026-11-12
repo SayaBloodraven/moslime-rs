@@ -143,6 +143,7 @@ const PAGE: &str = r##"<!doctype html>
 <style>
 :root{color-scheme:dark}
 *{box-sizing:border-box}
+.kiosk,.kiosk *{cursor:none !important}
 body{margin:0;background:#16181c;color:#e8e8e8;font:16px system-ui,sans-serif}
 header{display:flex;flex-wrap:wrap;gap:10px;align-items:center;justify-content:space-between;padding:12px 14px;border-bottom:1px solid #2a2d33}
 h1{font-size:18px;margin:0}
@@ -186,6 +187,8 @@ main{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:
   <div class="bar"><button id="dback">&#9003;</button><button id="dclr">Clear</button><button id="dc">Cancel</button><button class="start" id="ds">Save</button></div>
 </div></div>
 <script>
+// Opened by the Pi's kiosk browser (address ends in ?kiosk=1): hide the mouse pointer.
+if (location.search.indexOf('kiosk') >= 0) document.documentElement.classList.add('kiosk');
 const list = document.getElementById('list');
 const cards = {};
 let curServer = '';
