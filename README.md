@@ -7,6 +7,12 @@ and a headless mode with a web control page (Raspberry Pi / Linux).
 This is a Rust port and extension of [moslime](https://github.com/moslime/moslime)
 (MIT). The Bluetooth protocol work and the original code are by the moslime
 authors (lmore377, PlatinumVsReality, itstait and contributors); thank you.
+This port was written by SayaBloodraven with the help of Claude (an AI assistant
+made by Anthropic), which wrote much of the Rust code and documentation. The
+direction, hardware testing on Windows and project decisions are the owner's.
+Parts of it, notably the Raspberry Pi/Linux build, have not been tested on real
+hardware yet (see below).
+
 This project is unofficial and not affiliated with Sony or SlimeVR. mocopi is a
 trademark of Sony.
 
