@@ -59,3 +59,12 @@ jobs:
       - uses: softprops/action-gh-release@v2
         with:
           files: moslime-*.zip
+          # Tags like v0.2.0-rc1 are published as pre-releases.
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          generate_release_notes: true
+          body: |
+            Release candidate. Windows: tested by the author with six trackers
+            (read WINDOWS-README.md about the Bluetooth reconnect limitation).
+            Linux / Raspberry Pi headless build, web control page and kiosk steps:
+            they compile and pass the tests but are not yet tested on real hardware.
+            Please report what you find, with the log output.
