@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
 # moslime-rs installer for Raspberry Pi OS / Debian / Ubuntu (headless build).
 #
+#   bash <(wget -qO- https://moslime.bloodraven.net) --service
+#
+# or, to read it first:
 #   curl -fsSL https://raw.githubusercontent.com/SayaBloodraven/moslime-rs/main/install.sh -o install.sh
-#   less install.sh            # have a look before running it
-#   bash install.sh
+#   less install.sh
+#   bash install.sh --service
 #
 # Options:
 #   --tag vX.Y.Z    install a specific release (default: the newest, pre-releases included)

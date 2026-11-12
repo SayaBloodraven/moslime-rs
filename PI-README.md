@@ -3,8 +3,13 @@
 ## Quick install (script)
 On the Pi (64-bit Raspberry Pi OS or Debian/Ubuntu), as your normal user:
 
+    bash <(wget -qO- https://moslime.bloodraven.net) --service
+
+That address redirects to `install.sh` in this repository. If you'd rather read
+the script before running it (a good habit), download it first:
+
     curl -fsSL https://raw.githubusercontent.com/SayaBloodraven/moslime-rs/main/install.sh -o install.sh
-    less install.sh          # read it first if you like
+    less install.sh
     bash install.sh --service
 
 It installs the Bluetooth packages, downloads the newest release into
