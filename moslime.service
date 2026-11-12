@@ -1,0 +1,20 @@
+# Copy to /etc/systemd/system/moslime.service, edit User and paths, then:
+#   sudo systemctl daemon-reload && sudo systemctl enable --now moslime
+[Unit]
+Description=Mocopi to SlimeVR bridge
+After=bluetooth.target network-online.target
+Wants=bluetooth.target network-online.target
+
+[Service]
+User=pi
+WorkingDirectory=/home/pi/moslime-rs
+ExecStart=/home/pi/moslime-rs/target/release/moslime --headless
+Restart=on-failure
+# Optional: show the log on the Pi's own screen (console 1) instead of only the journal.
+# StandardOutput=tty
+# StandardError=tty
+# TTYPath=/dev/tty1
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

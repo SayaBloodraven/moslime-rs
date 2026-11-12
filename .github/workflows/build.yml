@@ -1,0 +1,61 @@
+# Builds downloadable programs on GitHub (no Rust needed on your own PC).
+# Push this project to a GitHub repo, then open the "Actions" tab; each run
+# produces downloadable files under "Artifacts". Tag a release (git tag v0.2.0
+# && git push --tags) to attach them to a GitHub Release.
+name: build
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo build --release
+      - run: cargo test
+      - uses: actions/upload-artifact@v4
+        with:
+          name: moslime-windows
+          path: |
+            target/release/moslime.exe
+            config_six.example.json
+            WINDOWS-README.md
+
+  linux-headless:
+    strategy:
+      matrix:
+        include:
+          - runner: ubuntu-24.04
+            name: moslime-linux-x64
+          - runner: ubuntu-24.04-arm
+            name: moslime-linux-arm64   # Raspberry Pi (64-bit OS)
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y libdbus-1-dev pkg-config
+      - uses: dtolnay/rust-toolchain@stable
+      - run: cargo build --release --no-default-features
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: |
+            target/release/moslime
+            config_six.example.json
+            moslime.service
+            PI-README.md
+
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [windows, linux-headless]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+      - run: |
+          for d in moslime-*; do (cd "$d" && zip -r "../$d.zip" .); done
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: moslime-*.zip

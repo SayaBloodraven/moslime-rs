@@ -1,0 +1,421 @@
+//! One tokio task per tracker. Each task owns its own UDP socket and packet
+//! counter, reconnects on its own with backoff, and never touches the GUI
+//! directly (it only updates a small shared view the GUI polls).
+
+use std::net::SocketAddr;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
+
+use anyhow::{anyhow, Context, Result};
+use btleplug::api::{Central, CharPropFlags, Peripheral as _, ScanFilter, WriteType};
+use btleplug::platform::{Adapter, Peripheral};
+use futures::StreamExt;
+use tokio::net::UdpSocket;
+use tokio::sync::{Semaphore, SemaphorePermit};
+use tokio_util::sync::CancellationToken;
+use uuid::Uuid;
+
+use crate::protocol::{self, Quat};
+use crate::winbt;
+
+const DATA_CHAR_UUID: Uuid = Uuid::from_u128(0x25047e64_657c_4856_afcf_e315048a965b);
+const CMD_CHAR_UUID: Uuid = Uuid::from_u128(0x0000ff01_0000_1000_8000_00805f9b34fb);
+const START_STREAM_CMD: [u8; 7] = [0x7e, 0x03, 0x18, 0xd6, 0x01, 0x00, 0x00];
+
+const FIND_TIMEOUT: Duration = Duration::from_secs(15);
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+/// No data for this long on a "connected" tracker => treat as dead and reconnect.
+const STALE_AFTER: Duration = Duration::from_secs(5);
+const BACKOFF_MIN: Duration = Duration::from_secs(1);
+const BACKOFF_MAX: Duration = Duration::from_secs(15);
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum Status {
+    Disconnected,
+    Connecting,
+    Connected,
+}
+
+#[derive(Clone, Debug)]
+pub struct TrackerView {
+    pub status: Status,
+    pub quat: Quat,
+    pub packets: u64,
+    pub message: String,
+}
+
+impl Default for TrackerView {
+    fn default() -> Self {
+        Self {
+            status: Status::Disconnected,
+            quat: [1.0, 0.0, 0.0, 0.0],
+            packets: 0,
+            message: String::new(),
+        }
+    }
+}
+
+/// Limits how many trackers are in the BLE connect phase at once.
+/// Normal mode: up to `max_parallel` at a time. Compatibility mode (cheap
+/// onboard adapters, e.g. many MediaTek chips): strictly one at a time, with
+/// a short pause before the next tracker starts connecting. Trackers always
+/// *stream* in parallel once connected; only the connect phase is metered.
+pub struct ConnectGate {
+    parallel: Semaphore,
+    serial: Semaphore,
+    pub compat: AtomicBool,
+    scan_refreshed: Mutex<Instant>,
+}
+
+pub struct ConnectPermit<'a> {
+    _serial: Option<SemaphorePermit<'a>>,
+    _parallel: SemaphorePermit<'a>,
+}
+
+impl ConnectGate {
+    pub fn new(max_parallel: usize) -> Self {
+        Self {
+            parallel: Semaphore::new(max_parallel),
+            serial: Semaphore::new(1),
+            compat: AtomicBool::new(false),
+            scan_refreshed: Mutex::new(Instant::now()),
+        }
+    }
+
+    /// True for at most one caller per 10 seconds, so six trackers that all
+    /// can't find their puck don't each restart the shared scan.
+    fn claim_scan_refresh(&self) -> bool {
+        match self.scan_refreshed.lock() {
+            Ok(mut t) if t.elapsed() > Duration::from_secs(10) => {
+                *t = Instant::now();
+                true
+            }
+            _ => false,
+        }
+    }
+
+    fn is_compat(&self) -> bool {
+        self.compat.load(Ordering::Relaxed)
+    }
+
+    /// Permits are always taken in the same order so waiters cannot deadlock.
+    async fn acquire(&self) -> Result<ConnectPermit<'_>> {
+        let serial = if self.is_compat() {
+            Some(
+                self.serial
+                    .acquire()
+                    .await
+                    .map_err(|_| anyhow!("connect gate closed"))?,
+            )
+        } else {
+            None
+        };
+        let parallel = self
+            .parallel
+            .acquire()
+            .await
+            .map_err(|_| anyhow!("connect gate closed"))?;
+        Ok(ConnectPermit {
+            _serial: serial,
+            _parallel: parallel,
+        })
+    }
+}
+
+pub struct TrackerCtx {
+    pub sensor_id: u8,
+    /// Canonical "AA:BB:CC:DD:EE:FF"
+    pub mac: String,
+    pub mac_bytes: [u8; 6],
+    pub adapter: Adapter,
+    /// Limits how many trackers are in the connect phase at once (Windows BLE
+    /// stacks tend to fail when many connects are issued simultaneously).
+    pub gate: Arc<ConnectGate>,
+    pub view: Arc<Mutex<TrackerView>>,
+    pub cancel: CancellationToken,
+    pub slime_addr: SocketAddr,
+}
+
+impl TrackerCtx {
+    fn set_status(&self, s: Status) {
+        if let Ok(mut v) = self.view.lock() {
+            v.status = s;
+        }
+    }
+
+    fn note(&self, msg: impl Into<String>) {
+        let msg = msg.into();
+        eprintln!("[tracker #{}] {}", self.sensor_id as usize + 1, msg);
+        if let Ok(mut v) = self.view.lock() {
+            v.message = msg;
+        }
+    }
+}
+
+/// Supervisor loop: connect, stream, and on any failure back off and retry
+/// until cancelled.
+pub async fn run_tracker(ctx: TrackerCtx) {
+    let sock = match bind_socket(ctx.slime_addr).await {
+        Ok(s) => s,
+        Err(e) => {
+            ctx.note(format!("UDP socket error: {e:#}"));
+            return;
+        }
+    };
+
+    let mut pcounter: u64 = 0;
+    let mut backoff = BACKOFF_MIN;
+
+    while !ctx.cancel.is_cancelled() {
+        ctx.set_status(Status::Connecting);
+        let started = Instant::now();
+
+        let result = session(&ctx, &sock, &mut pcounter).await;
+        // The status is still Connected here only if the session really got to
+        // the streaming stage (a failed scan or connect never sets it).
+        let was_streaming = ctx
+            .view
+            .lock()
+            .map(|v| v.status == Status::Connected)
+            .unwrap_or(false);
+        ctx.set_status(Status::Disconnected);
+
+        if ctx.cancel.is_cancelled() {
+            break;
+        }
+        let reason = match result {
+            Ok(()) => "stream ended".to_string(),
+            Err(e) => format!("{e:#}"),
+        };
+
+        // A session that lasted a while resets the backoff; quick failures grow it.
+        backoff = if was_streaming && started.elapsed() > Duration::from_secs(10) {
+            BACKOFF_MIN
+        } else {
+            (backoff * 2).min(BACKOFF_MAX)
+        };
+        ctx.note(format!("{reason} - retrying in {}s", backoff.as_secs()));
+
+        tokio::select! {
+            _ = ctx.cancel.cancelled() => break,
+            _ = tokio::time::sleep(backoff) => {}
+        }
+    }
+
+    ctx.set_status(Status::Disconnected);
+    ctx.note("stopped");
+}
+
+async fn bind_socket(addr: SocketAddr) -> Result<UdpSocket> {
+    let sock = UdpSocket::bind("0.0.0.0:0").await?;
+    sock.connect(addr).await?;
+    Ok(sock)
+}
+
+/// UDP errors are ignored on purpose: on Windows, a connected UDP socket
+/// reports ICMP "port unreachable" (SlimeVR server not running yet) as an
+/// error on the next call, which must not kill the BLE session.
+async fn send(sock: &UdpSocket, pkt: &[u8]) {
+    let _ = sock.send(pkt).await;
+}
+
+async fn find_peripheral(
+    adapter: &Adapter,
+    mac: &str,
+    timeout: Duration,
+    cancel: &CancellationToken,
+    gate: &ConnectGate,
+) -> Result<Peripheral> {
+    let started = Instant::now();
+    let deadline = started + timeout;
+    loop {
+        for p in adapter.peripherals().await? {
+            if p.address().to_string().eq_ignore_ascii_case(mac) {
+                return Ok(p);
+            }
+        }
+        // Not found for a few seconds: the OS scan may have gone stale, so
+        // restart it (rate-limited across all trackers).
+        if started.elapsed() > Duration::from_secs(4) && gate.claim_scan_refresh() {
+            let _ = adapter.stop_scan().await;
+            let _ = adapter.start_scan(ScanFilter::default()).await;
+        }
+        if Instant::now() > deadline {
+            return Err(anyhow!("tracker {mac} not seen in scan"));
+        }
+        tokio::select! {
+            _ = cancel.cancelled() => return Err(anyhow!("cancelled")),
+            _ = tokio::time::sleep(Duration::from_millis(250)) => {}
+        }
+    }
+}
+
+/// One connect -> stream -> disconnect cycle.
+async fn session(ctx: &TrackerCtx, sock: &UdpSocket, pcounter: &mut u64) -> Result<()> {
+    let permit = tokio::select! {
+        p = ctx.gate.acquire() => p?,
+        _ = ctx.cancel.cancelled() => return Ok(()),
+    };
+
+    let p = find_peripheral(&ctx.adapter, &ctx.mac, FIND_TIMEOUT, &ctx.cancel, &ctx.gate).await?;
+
+    let connected = tokio::time::timeout(CONNECT_TIMEOUT, p.connect())
+        .await
+        .context("connect timed out")?;
+    if let Err(e) = connected {
+        // Ask Windows directly why, so the log says more than "Not connected".
+        let detail = winbt::probe(ctx.mac_bytes).await;
+        return Err(anyhow!("connect failed: {e} [{detail}]"));
+    }
+
+    let result = stream(ctx, sock, pcounter, &p, permit).await;
+    let _ = p.disconnect().await; // always release the BLE link
+    // Give Windows and the puck a moment to fully drop the link and start
+    // advertising again before anyone tries to reconnect.
+    tokio::time::sleep(Duration::from_millis(800)).await;
+    result
+}
+
+async fn stream(
+    ctx: &TrackerCtx,
+    sock: &UdpSocket,
+    pcounter: &mut u64,
+    p: &Peripheral,
+    permit: ConnectPermit<'_>,
+) -> Result<()> {
+    // Windows sometimes hands back an incomplete service list right after
+    // connecting (the symptom was "data characteristic not found" on one
+    // puck while the others were fine). Ask again a few times before giving up.
+    let mut found = None;
+    let mut seen = 0usize;
+    for attempt in 1..=4 {
+        p.discover_services()
+            .await
+            .context("service discovery failed")?;
+        let chars = p.characteristics();
+        seen = chars.len();
+        let data = chars.iter().find(|c| c.uuid == DATA_CHAR_UUID).cloned();
+        let cmd = chars.iter().find(|c| c.uuid == CMD_CHAR_UUID).cloned();
+        if let (Some(d), Some(c)) = (data, cmd) {
+            found = Some((d, c));
+            break;
+        }
+        ctx.note(&format!(
+            "attempt {attempt}/4: tracker reported {seen} characteristic(s), expected ones missing; asking again"
+        ));
+        tokio::time::sleep(Duration::from_millis(700)).await;
+    }
+    let (data_char, cmd_char) = found.ok_or_else(|| {
+        anyhow!("data/command characteristic not found after 4 tries ({seen} characteristics seen)")
+    })?;
+
+    let mut notifs = p.notifications().await?;
+
+    // Handshake is re-sent on every (re)connect so the server re-registers us.
+    *pcounter += 1;
+    send(
+        sock,
+        &protocol::build_handshake(&ctx.mac_bytes, protocol::FW_VERSION, *pcounter),
+    )
+    .await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    *pcounter += 1;
+    send(sock, &protocol::build_sensor_info(*pcounter, ctx.sensor_id)).await;
+
+    p.subscribe(&data_char)
+        .await
+        .context("subscribe failed")?;
+    let write_type = if cmd_char.properties.contains(CharPropFlags::WRITE) {
+        WriteType::WithResponse
+    } else {
+        WriteType::WithoutResponse
+    };
+    p.write(&cmd_char, &START_STREAM_CMD, write_type)
+        .await
+        .context("stream start command failed")?;
+
+    // Connect phase done: let the next tracker in. In compatibility mode,
+    // pause first so cheap adapters get a moment to settle.
+    if ctx.gate.is_compat() {
+        tokio::time::sleep(Duration::from_millis(1500)).await;
+    }
+    drop(permit);
+    ctx.set_status(Status::Connected);
+    ctx.note("streaming");
+
+    let mut last_rx = Instant::now();
+    let mut watchdog = tokio::time::interval(Duration::from_secs(1));
+
+    // If SlimeVR wasn't running (or its first reply got lost) when we sent the
+    // handshake, the server never learns about this tracker. Keep announcing
+    // every few seconds until the server answers with anything.
+    let mut registered = false;
+    let mut last_announce = Instant::now();
+    let mut warned = false;
+    let mut rxbuf = [0u8; 512];
+
+    loop {
+        tokio::select! {
+            _ = ctx.cancel.cancelled() => return Ok(()),
+
+            n = notifs.next() => {
+                let Some(n) = n else {
+                    return Err(anyhow!("notification stream closed (tracker disconnected)"));
+                };
+                if n.uuid != DATA_CHAR_UUID {
+                    continue;
+                }
+                last_rx = Instant::now();
+
+                if let Some((q, a)) = protocol::decode(&n.value) {
+                    *pcounter += 1;
+                    send(sock, &protocol::build_rotation_packet(q, *pcounter, ctx.sensor_id)).await;
+                    *pcounter += 1;
+                    send(sock, &protocol::build_accel_packet(a, *pcounter, ctx.sensor_id)).await;
+
+                    if let Ok(mut v) = ctx.view.lock() {
+                        v.quat = q;
+                        v.packets += 2;
+                    }
+                }
+            }
+
+            r = sock.recv(&mut rxbuf) => {
+                match r {
+                    Ok(n) if n > 0 => {
+                        if !registered {
+                            registered = true;
+                            ctx.note("SlimeVR server answered");
+                        }
+                    }
+                    Ok(_) => {}
+                    // Windows reports an earlier ICMP "port unreachable" here
+                    // when the server isn't up; not an error for us.
+                    Err(_) => tokio::time::sleep(Duration::from_millis(200)).await,
+                }
+            }
+
+            _ = watchdog.tick() => {
+                if last_rx.elapsed() > STALE_AFTER {
+                    return Err(anyhow!("no data for {}s", STALE_AFTER.as_secs()));
+                }
+                if !registered && last_announce.elapsed() >= Duration::from_secs(3) {
+                    if !warned {
+                        warned = true;
+                        ctx.note("no answer from SlimeVR yet - is it running? re-sending handshake every 3s");
+                    }
+                    last_announce = Instant::now();
+                    *pcounter += 1;
+                    send(
+                        sock,
+                        &protocol::build_handshake(&ctx.mac_bytes, protocol::FW_VERSION, *pcounter),
+                    )
+                    .await;
+                    *pcounter += 1;
+                    send(sock, &protocol::build_sensor_info(*pcounter, ctx.sensor_id)).await;
+                }
+            }
+        }
+    }
+}

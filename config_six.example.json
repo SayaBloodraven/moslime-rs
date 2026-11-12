@@ -1,0 +1,14 @@
+{
+  "trackers": [
+    "3C:38:F4:XX:XX:01",
+    "3C:38:F4:XX:XX:02",
+    "3C:38:F4:XX:XX:03",
+    "3C:38:F4:XX:XX:04",
+    "3C:38:F4:XX:XX:05",
+    "3C:38:F4:XX:XX:06"
+  ],
+  "compat": false,
+  "server": "192.168.1.50:6969",
+  "adapter": "",
+  "web_port": 8080
+}
