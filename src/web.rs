@@ -164,6 +164,7 @@ main{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:
 .card.connecting{border-left-color:#e0a030}
 .card.disconnected{border-left-color:#b04040}
 .top{display:flex;gap:10px;align-items:baseline}
+.sid{color:#8fc3ff;font-weight:600;font-family:ui-monospace,monospace}
 .mac{color:#9aa0a8;font-family:ui-monospace,monospace;font-size:13px;flex:1}
 .badge{font-size:13px}
 .msg{color:#b8bcc2;font-size:13px;min-height:2.6em;margin:8px 0;word-break:break-word}
@@ -219,7 +220,7 @@ function ensure(t) {
   if (cards[t.id]) return cards[t.id];
   const el = document.createElement('div');
   el.className = 'card';
-  el.innerHTML = '<div class="top"><b class="num"></b><span class="mac"></span><span class="badge"></span></div>' +
+  el.innerHTML = '<div class="top"><b class="num"></b><span class="sid"></span><span class="mac"></span><span class="badge"></span></div>' +
                  '<div class="msg"></div>' +
                  '<div class="row"><span class="pk"></span><button></button></div>';
   const c = {el: el, t: t};
@@ -238,6 +239,7 @@ function render(d) {
     c.t = t;
     c.el.className = 'card ' + t.status.toLowerCase();
     c.el.querySelector('.num').textContent = '#' + t.number;
+    c.el.querySelector('.sid').textContent = t.sid || '';
     c.el.querySelector('.mac').textContent = t.mac;
     c.el.querySelector('.badge').textContent = t.status;
     c.el.querySelector('.msg').textContent = t.message;

@@ -44,6 +44,8 @@ pub struct TrackerView {
     pub quat: Quat,
     pub packets: u64,
     pub message: String,
+    /// Printed ID of the puck ("QM-SS1 170E9" -> "170E9"); empty until known.
+    pub id: String,
 }
 
 impl Default for TrackerView {
@@ -53,6 +55,7 @@ impl Default for TrackerView {
             quat: [1.0, 0.0, 0.0, 0.0],
             packets: 0,
             message: String::new(),
+            id: String::new(),
         }
     }
 }
@@ -260,6 +263,20 @@ async fn session(ctx: &TrackerCtx, sock: &UdpSocket, pcounter: &mut u64) -> Resu
     };
 
     let p = find_peripheral(&ctx.adapter, &ctx.mac, FIND_TIMEOUT, &ctx.cancel, &ctx.gate).await?;
+
+    // Learn the printed ID from the name the puck advertises ("QM-SS1 170E9").
+    if let Ok(Some(props)) = p.properties().await {
+        if let Some(name) = props.local_name {
+            if let Some(id) = name.strip_prefix("QM-SS1") {
+                let id = id.trim();
+                if !id.is_empty() {
+                    if let Ok(mut v) = ctx.view.lock() {
+                        v.id = id.to_string();
+                    }
+                }
+            }
+        }
+    }
 
     let connected = tokio::time::timeout(CONNECT_TIMEOUT, p.connect())
         .await

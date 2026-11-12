@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::net::SocketAddr;
 use std::path::Path;
 
@@ -46,6 +47,9 @@ struct Config {
     /// Headless mode: port of the touch/browser control page. 0 = off.
     #[serde(default = "default_web_port")]
     web_port: u16,
+    /// Printed ID of each puck (the part after "QM-SS1 "), keyed by MAC.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    ids: BTreeMap<String, String>,
 }
 
 fn default_web_port() -> u16 {
@@ -64,6 +68,7 @@ impl Default for Config {
             server: default_server(),
             adapter: None,
             web_port: default_web_port(),
+            ids: BTreeMap::new(),
         }
     }
 }
@@ -77,6 +82,7 @@ pub struct Settings {
     pub server: String,
     pub adapter: Option<String>,
     pub web_port: u16,
+    pub ids: BTreeMap<String, String>,
 }
 
 pub fn exists() -> bool {
@@ -106,6 +112,7 @@ pub fn load() -> Settings {
         server: cfg.server,
         adapter: cfg.adapter.filter(|a| !a.trim().is_empty()),
         web_port: cfg.web_port,
+        ids: cfg.ids,
     }
 }
 
@@ -115,6 +122,16 @@ pub fn save(macs: &[String], compat: bool) -> Result<()> {
     let mut cfg = read();
     cfg.trackers = macs.to_vec();
     cfg.compat = compat;
+    std::fs::write(CONFIG_FILE, serde_json::to_string_pretty(&cfg)?)?;
+    Ok(())
+}
+
+/// Remembers the printed IDs of pucks (merged into what is already saved).
+pub fn save_ids(ids: &BTreeMap<String, String>) -> Result<()> {
+    let mut cfg = read();
+    for (mac, id) in ids {
+        cfg.ids.insert(mac.to_uppercase(), id.clone());
+    }
     std::fs::write(CONFIG_FILE, serde_json::to_string_pretty(&cfg)?)?;
     Ok(())
 }

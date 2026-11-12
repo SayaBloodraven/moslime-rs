@@ -371,6 +371,12 @@ mod linux {
             })
             .collect();
         config::save(&macs, settings.compat)?;
+        let ids: BTreeMap<String, String> = found
+            .iter()
+            .filter(|(_, n)| !n.is_empty())
+            .map(|(m, n)| (m.clone(), short_id(n)))
+            .collect();
+        config::save_ids(&ids)?;
 
         // Remember which adapter holds the pairings (only matters with several).
         if adapters.len() > 1 {

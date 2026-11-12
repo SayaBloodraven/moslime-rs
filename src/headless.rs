@@ -3,6 +3,7 @@
 //! logs to the terminal, serves a small control web page (see web.rs) and
 //! shuts down cleanly on Ctrl+C or SIGTERM.
 
+use std::collections::BTreeMap;
 use std::net::SocketAddr;
 use std::sync::atomic::Ordering;
 use std::sync::{Arc, Mutex};
@@ -169,16 +170,17 @@ impl Bridge {
                     .map(|r| !r.cancel.is_cancelled() && !r.handle.is_finished())
                     .unwrap_or(false)
             };
-            let (status, packets, message) = {
+            let (status, packets, message, sid) = {
                 match s.view.lock() {
-                    Ok(v) => (format!("{:?}", v.status), v.packets, v.message.clone()),
-                    Err(_) => ("Disconnected".to_string(), 0, String::new()),
+                    Ok(v) => (format!("{:?}", v.status), v.packets, v.message.clone(), v.id.clone()),
+                    Err(_) => ("Disconnected".to_string(), 0, String::new(), String::new()),
                 }
             };
             items.push(format!(
-                "{{\"id\":{i},\"number\":{},\"mac\":\"{}\",\"status\":\"{}\",\"running\":{running},\"packets\":{packets},\"message\":\"{}\"}}",
+                "{{\"id\":{i},\"number\":{},\"mac\":\"{}\",\"sid\":\"{}\",\"status\":\"{}\",\"running\":{running},\"packets\":{packets},\"message\":\"{}\"}}",
                 s.sensor_id as usize + 1,
                 json_escape(&s.mac),
+                json_escape(&sid),
                 status,
                 json_escape(&message)
             ));
@@ -189,6 +191,19 @@ impl Bridge {
             json_escape(&self.addr().to_string()),
             items.join(",")
         )
+    }
+
+    /// Printed IDs learned so far, keyed by MAC.
+    fn known_ids(&self) -> BTreeMap<String, String> {
+        let mut out = BTreeMap::new();
+        for s in &self.slots {
+            if let Ok(v) = s.view.lock() {
+                if !v.id.is_empty() {
+                    out.insert(s.mac.to_uppercase(), v.id.clone());
+                }
+            }
+        }
+        out
     }
 
     fn summary(&self) -> String {
@@ -293,12 +308,18 @@ pub fn run(rt: &Runtime) -> Result<()> {
 
         let slots = wanted
             .into_iter()
-            .map(|(i, mac, mac_bytes)| Slot {
-                sensor_id: i as u8,
-                mac,
-                mac_bytes,
-                view: Arc::new(Mutex::new(TrackerView::default())),
-                run: AsyncMutex::new(None),
+            .map(|(i, mac, mac_bytes)| {
+                let view = TrackerView {
+                    id: settings.ids.get(&mac).cloned().unwrap_or_default(),
+                    ..TrackerView::default()
+                };
+                Slot {
+                    sensor_id: i as u8,
+                    mac,
+                    mac_bytes,
+                    view: Arc::new(Mutex::new(view)),
+                    run: AsyncMutex::new(None),
+                }
             })
             .collect();
 
@@ -330,13 +351,21 @@ pub fn run(rt: &Runtime) -> Result<()> {
 
         let shutdown = shutdown_signal();
         tokio::pin!(shutdown);
+        let mut last_saved: BTreeMap<String, String> = BTreeMap::new();
         let mut tick = tokio::time::interval(Duration::from_secs(30));
         tick.tick().await; // the first tick fires immediately; skip it
 
         loop {
             tokio::select! {
                 _ = &mut shutdown => break,
-                _ = tick.tick() => eprintln!("{}", bridge.summary()),
+                _ = tick.tick() => {
+                    eprintln!("{}", bridge.summary());
+                    // Remember newly seen puck IDs so they show immediately next time.
+                    let ids = bridge.known_ids();
+                    if !ids.is_empty() && ids != last_saved && config::save_ids(&ids).is_ok() {
+                        last_saved = ids;
+                    }
+                }
             }
         }
 
