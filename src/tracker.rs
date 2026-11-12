@@ -211,17 +211,19 @@ pub async fn run_tracker(ctx: TrackerCtx) {
     ctx.note("stopped");
 }
 
-async fn bind_socket(addr: SocketAddr) -> Result<UdpSocket> {
-    let sock = UdpSocket::bind("0.0.0.0:0").await?;
-    sock.connect(addr).await?;
-    Ok(sock)
+/// The socket is deliberately NOT connected to the server: a connected UDP
+/// socket keeps the source IP it picked at the start, so if this machine's IP
+/// changes (DHCP, Wi-Fi roaming) it would silently stop reaching SlimeVR until
+/// restart. Sending with `send_to` lets the OS choose the source per packet.
+async fn bind_socket(_addr: SocketAddr) -> Result<UdpSocket> {
+    Ok(UdpSocket::bind("0.0.0.0:0").await?)
 }
 
 /// UDP errors are ignored on purpose: on Windows, a connected UDP socket
 /// reports ICMP "port unreachable" (SlimeVR server not running yet) as an
 /// error on the next call, which must not kill the BLE session.
-async fn send(sock: &UdpSocket, pkt: &[u8]) {
-    let _ = sock.send(pkt).await;
+async fn send(sock: &UdpSocket, to: SocketAddr, pkt: &[u8]) {
+    let _ = sock.send_to(pkt, to).await;
 }
 
 async fn find_peripheral(
@@ -339,12 +341,13 @@ async fn stream(
     *pcounter += 1;
     send(
         sock,
+        ctx.slime_addr,
         &protocol::build_handshake(&ctx.mac_bytes, protocol::FW_VERSION, *pcounter),
     )
     .await;
     tokio::time::sleep(Duration::from_millis(300)).await;
     *pcounter += 1;
-    send(sock, &protocol::build_sensor_info(*pcounter, ctx.sensor_id)).await;
+    send(sock, ctx.slime_addr, &protocol::build_sensor_info(*pcounter, ctx.sensor_id)).await;
 
     p.subscribe(&data_char)
         .await
@@ -393,9 +396,9 @@ async fn stream(
 
                 if let Some((q, a)) = protocol::decode(&n.value) {
                     *pcounter += 1;
-                    send(sock, &protocol::build_rotation_packet(q, *pcounter, ctx.sensor_id)).await;
+                    send(sock, ctx.slime_addr, &protocol::build_rotation_packet(q, *pcounter, ctx.sensor_id)).await;
                     *pcounter += 1;
-                    send(sock, &protocol::build_accel_packet(a, *pcounter, ctx.sensor_id)).await;
+                    send(sock, ctx.slime_addr, &protocol::build_accel_packet(a, *pcounter, ctx.sensor_id)).await;
 
                     if let Ok(mut v) = ctx.view.lock() {
                         v.quat = q;
@@ -432,11 +435,12 @@ async fn stream(
                     *pcounter += 1;
                     send(
                         sock,
+                        ctx.slime_addr,
                         &protocol::build_handshake(&ctx.mac_bytes, protocol::FW_VERSION, *pcounter),
                     )
                     .await;
                     *pcounter += 1;
-                    send(sock, &protocol::build_sensor_info(*pcounter, ctx.sensor_id)).await;
+                    send(sock, ctx.slime_addr, &protocol::build_sensor_info(*pcounter, ctx.sensor_id)).await;
                 }
             }
         }
