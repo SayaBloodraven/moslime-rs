@@ -12,7 +12,12 @@ pub const CONFIG_FILE: &str = "config_six.json";
 pub const TRACKERS: usize = 6;
 /// How many trackers may be in the BLE connect phase at once (normal mode).
 /// "Compatibility Mode" drops this to 1 and adds a pause.
+/// BlueZ (Linux) answers "In Progress" when two connections to different
+/// devices are started at once, so on Linux they go one after another.
+#[cfg(windows)]
 pub const MAX_PARALLEL_CONNECTS: usize = 2;
+#[cfg(not(windows))]
+pub const MAX_PARALLEL_CONNECTS: usize = 1;
 pub const DEFAULT_SERVER: &str = "127.0.0.1:6969";
 pub const DEFAULT_WEB_PORT: u16 = 8080;
 

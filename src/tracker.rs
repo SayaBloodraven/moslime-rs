@@ -17,6 +17,7 @@ use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
 use crate::protocol::{self, Quat};
+#[cfg(windows)]
 use crate::winbt;
 
 const DATA_CHAR_UUID: Uuid = Uuid::from_u128(0x25047e64_657c_4856_afcf_e315048a965b);
@@ -265,8 +266,13 @@ async fn session(ctx: &TrackerCtx, sock: &UdpSocket, pcounter: &mut u64) -> Resu
         .context("connect timed out")?;
     if let Err(e) = connected {
         // Ask Windows directly why, so the log says more than "Not connected".
-        let detail = winbt::probe(ctx.mac_bytes).await;
-        return Err(anyhow!("connect failed: {e} [{detail}]"));
+        #[cfg(windows)]
+        {
+            let detail = winbt::probe(ctx.mac_bytes).await;
+            return Err(anyhow!("connect failed: {e} [{detail}]"));
+        }
+        #[cfg(not(windows))]
+        return Err(anyhow!("connect failed: {e}"));
     }
 
     let result = stream(ctx, sock, pcounter, &p, permit).await;

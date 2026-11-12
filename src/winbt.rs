@@ -44,6 +44,7 @@ fn probe_blocking(mac: [u8; 6]) -> String {
     }
 }
 
+#[cfg_attr(not(windows), allow(dead_code))]
 pub async fn probe(mac: [u8; 6]) -> String {
     #[cfg(windows)]
     {
