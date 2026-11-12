@@ -19,6 +19,21 @@ TAG=""
 BUILD=0
 SERVICE=0
 
+usage() {
+  cat <<'USAGE'
+moslime-rs installer for Raspberry Pi OS / Debian / Ubuntu (headless build).
+
+  bash <(wget -qO- https://raw.githubusercontent.com/SayaBloodraven/moslime-rs/main/install.sh) [options]
+
+Options:
+  --tag vX.Y.Z    install a specific release (default: the newest, pre-releases included)
+  --build         build from source instead of downloading the release (10-20 min on a Pi 4)
+  --service       also install a systemd service that starts at boot (you start it after pairing)
+  --dir PATH      install folder (default: ~/moslime-rs)
+  --help
+USAGE
+}
+
 say() { printf '\n==> %s\n' "$*"; }
 die() { printf 'Error: %s\n' "$*" >&2; exit 1; }
 
@@ -28,7 +43,7 @@ while [ $# -gt 0 ]; do
     --build)   BUILD=1; shift ;;
     --service) SERVICE=1; shift ;;
     --dir)     [ $# -ge 2 ] || die "--dir needs a value"; DIR="$2"; shift 2 ;;
-    -h|--help) sed -n '2,13p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    -h|--help) usage; exit 0 ;;
     *)         die "unknown option: $1 (try --help)" ;;
   esac
 done
