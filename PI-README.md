@@ -1,5 +1,17 @@
 # Running the bridge on a Raspberry Pi (headless)
 
+## Quick install (script)
+On the Pi (64-bit Raspberry Pi OS or Debian/Ubuntu), as your normal user:
+
+    curl -fsSL https://raw.githubusercontent.com/SayaBloodraven/moslime-rs/main/install.sh -o install.sh
+    less install.sh          # read it first if you like
+    bash install.sh --service
+
+It installs the Bluetooth packages, downloads the newest release into
+`~/moslime-rs`, creates `config_six.json` (asks for your PC's IP) and, with
+`--service`, sets up auto-start. It then prints the pairing steps below.
+Use `--build` to compile from source instead. The manual steps follow.
+
 ## 1. Prepare the Pi
     sudo apt update
     sudo apt install -y build-essential pkg-config libdbus-1-dev bluez
