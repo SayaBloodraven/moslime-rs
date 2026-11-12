@@ -114,6 +114,19 @@ pub fn save(macs: &[String], compat: bool) -> Result<()> {
     Ok(())
 }
 
+/// Saves only the adapter hint (e.g. "hci1"); empty clears it.
+#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+pub fn save_adapter(adapter: &str) -> Result<()> {
+    let mut cfg = read();
+    cfg.adapter = if adapter.trim().is_empty() {
+        None
+    } else {
+        Some(adapter.trim().to_string())
+    };
+    std::fs::write(CONFIG_FILE, serde_json::to_string_pretty(&cfg)?)?;
+    Ok(())
+}
+
 /// Saves only the SlimeVR server address, keeping everything else.
 pub fn save_server(server: &str) -> Result<()> {
     let mut cfg = read();

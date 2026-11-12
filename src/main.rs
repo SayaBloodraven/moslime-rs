@@ -6,6 +6,7 @@ mod config;
 mod gui;
 mod headless;
 mod protocol;
+mod setup;
 mod tracker;
 mod web;
 mod winbt;
@@ -18,6 +19,7 @@ moslime - SlimeVR bridge for Sony mocopi (QM-SS1) trackers
 USAGE:
     moslime                  open the window (when built with the GUI)
     moslime --headless       no window: read config_six.json and run
+    moslime --setup          (Linux) find, pair and save your pucks step by step
     moslime --list-adapters  show Bluetooth adapters and exit
     moslime --help           this text
 ";
@@ -54,6 +56,10 @@ fn main() -> Result<()> {
     if has("--help") || has("-h") {
         print!("{HELP}");
         return Ok(());
+    }
+    if has("--setup") {
+        let rt = build_runtime()?;
+        return setup::run(&rt);
     }
     if has("--list-adapters") {
         let rt = build_runtime()?;
