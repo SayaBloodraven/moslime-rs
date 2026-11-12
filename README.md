@@ -24,14 +24,18 @@ Build from source: `cargo build --release` (window) or
 Prebuilt files come from the GitHub Actions build.
 
 ## Status / known limitations
+- **Raspberry Pi 4B + TP-Link UB500 Plus (Linux, headless):** tested with six
+  mocopi pucks. The pairing helper (`--setup`), streaming to SlimeVR, the web
+  control page, Stop/Start of single pucks and of all pucks, and auto-start
+  after a reboot all work. A puck occasionally takes a while to connect after a
+  start (they advertise in bursts); the bridge keeps retrying.
 - **Windows:** all six pucks connect from a fresh boot. After a puck is stopped
   (or the app is closed), Windows may refuse to reconnect it until the PC is
   restarted ("Not connected ... GATT status: Unreachable"). The cause is not
   understood; the original Python moslime behaves the same way. Details in
-  [WINDOWS-README.md](WINDOWS-README.md).
-- **Raspberry Pi / Linux headless build, the web control page and the touch-screen
-  kiosk steps have not been tested on real hardware yet.** Treat them as a
-  starting point and please report what you find.
+  [WINDOWS-README.md](WINDOWS-README.md). Linux does not have this problem.
+- **Not tested yet:** the touch-screen kiosk (`install.sh --kiosk`), other
+  Linux distributions, and more than six pucks (a second adapter).
 - Tested with a TP-Link UB500 Plus adapter. Other adapters (especially some
   built-in ones) may struggle with six trackers; try Compatibility Mode.
 - The web control page has no password; anyone on your network can use it.
