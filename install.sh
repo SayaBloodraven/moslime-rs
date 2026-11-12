@@ -172,7 +172,7 @@ if [ "$KIOSK" -eq 1 ]; then
 
 # moslime kiosk: on the Pi's own screen (tty1) show the control page full-screen
 if [ -z "${WAYLAND_DISPLAY:-}" ] && [ "$(tty)" = /dev/tty1 ]; then
-  until wget -q --spider http://localhost:8080; do sleep 1; done
+  until wget -q -O /dev/null http://localhost:8080/api/status; do sleep 1; done
   exec cage -s -- chromium --kiosk --noerrdialogs --disable-infobars --no-first-run --ozone-platform=wayland http://localhost:8080
 fi
 KIOSKRC

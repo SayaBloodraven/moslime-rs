@@ -62,8 +62,8 @@ async fn handle(mut sock: TcpStream, bridge: Arc<Bridge>) -> Result<()> {
         .unwrap_or_default();
 
     let (status, ctype, body): (&str, &str, String) = match (method, path) {
-        ("GET", "/") | ("GET", "/index.html") => ("200 OK", "text/html; charset=utf-8", PAGE.to_string()),
-        ("GET", "/api/status") => ("200 OK", "application/json", bridge.status_json().await),
+        ("GET" | "HEAD", "/") | ("GET" | "HEAD", "/index.html") => ("200 OK", "text/html; charset=utf-8", PAGE.to_string()),
+        ("GET" | "HEAD", "/api/status") => ("200 OK", "application/json", bridge.status_json().await),
         ("POST", "/api/start_all") => {
             bridge.start_all().await;
             ("200 OK", "application/json", bridge.status_json().await)
@@ -99,7 +99,9 @@ async fn handle(mut sock: TcpStream, bridge: Arc<Bridge>) -> Result<()> {
         body.len()
     );
     sock.write_all(head.as_bytes()).await?;
-    sock.write_all(body.as_bytes()).await?;
+    if method != "HEAD" {
+        sock.write_all(body.as_bytes()).await?;
+    }
     let _ = sock.shutdown().await;
     Ok(())
 }
