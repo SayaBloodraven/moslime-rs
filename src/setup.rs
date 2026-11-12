@@ -173,7 +173,22 @@ mod linux {
         name.strip_prefix("QM-SS1").unwrap_or(name).trim().to_string()
     }
 
+    /// Pairs and trusts one puck, retrying once, then disconnects it so the
+    /// idle link doesn't get in the way of the next puck.
     async fn pair_one(ctl: &mut Ctl, mac: &str) -> std::result::Result<(), String> {
+        let mut result = pair_once(ctl, mac).await;
+        if result.is_err() {
+            tokio::time::sleep(Duration::from_secs(3)).await;
+            result = pair_once(ctl, mac).await;
+        }
+        if result.is_ok() {
+            let _ = ctl.send(&format!("disconnect {mac}")).await;
+            tokio::time::sleep(Duration::from_millis(1500)).await;
+        }
+        result
+    }
+
+    async fn pair_once(ctl: &mut Ctl, mac: &str) -> std::result::Result<(), String> {
         ctl.send(&format!("pair {mac}")).await.map_err(|e| e.to_string())?;
         let until = Instant::now() + Duration::from_secs(40);
         let mut done = false;
