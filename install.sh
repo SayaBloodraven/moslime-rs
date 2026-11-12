@@ -12,6 +12,7 @@
 #   --tag vX.Y.Z    install a specific release (default: the newest, pre-releases included)
 #   --build         build from source instead of downloading the release (takes 10-20 min on a Pi 4)
 #   --service       also install a systemd service that starts at boot (you start it after pairing)
+#   --kiosk         show the control page full-screen on the Pi's own (touch) screen, no desktop needed
 #   --dir PATH      install folder (default: ~/moslime-rs)
 #   --help
 set -euo pipefail
@@ -21,6 +22,7 @@ DIR="${HOME}/moslime-rs"
 TAG=""
 BUILD=0
 SERVICE=0
+KIOSK=0
 
 usage() {
   cat <<'USAGE'
@@ -32,6 +34,7 @@ Options:
   --tag vX.Y.Z    install a specific release (default: the newest, pre-releases included)
   --build         build from source instead of downloading the release (10-20 min on a Pi 4)
   --service       also install a systemd service that starts at boot (you start it after pairing)
+  --kiosk         show the control page full-screen on the Pi's own (touch) screen, no desktop needed
   --dir PATH      install folder (default: ~/moslime-rs)
   --help
 USAGE
@@ -45,6 +48,7 @@ while [ $# -gt 0 ]; do
     --tag)     [ $# -ge 2 ] || die "--tag needs a value"; TAG="$2"; shift 2 ;;
     --build)   BUILD=1; shift ;;
     --service) SERVICE=1; shift ;;
+    --kiosk)   KIOSK=1; shift ;;
     --dir)     [ $# -ge 2 ] || die "--dir needs a value"; DIR="$2"; shift 2 ;;
     -h|--help) usage; exit 0 ;;
     *)         die "unknown option: $1 (try --help)" ;;
@@ -64,6 +68,9 @@ say "Installing system packages"
 PKGS="bluez curl unzip jq ca-certificates"
 if [ "$BUILD" -eq 1 ]; then
   PKGS="$PKGS build-essential pkg-config libdbus-1-dev git"
+fi
+if [ "$KIOSK" -eq 1 ]; then
+  PKGS="$PKGS cage chromium"
 fi
 sudo apt-get update
 # shellcheck disable=SC2086
@@ -145,6 +152,29 @@ UNIT
   echo "Service installed (not started yet: pair the pucks and fill in the MACs first)."
 fi
 
+if [ "$KIOSK" -eq 1 ]; then
+  say "Setting up the touch-screen kiosk"
+  for g in video input render; do
+    getent group "$g" >/dev/null && sudo usermod -aG "$g" "$USER" || true
+  done
+  if command -v raspi-config >/dev/null 2>&1; then
+    sudo raspi-config nonint do_boot_behaviour B2 || echo "Could not set console auto-login; set it in raspi-config (System Options > Boot / Auto Login)."
+  else
+    echo "Note: turn on console auto-login for your user yourself (this is not a Raspberry Pi OS system)."
+  fi
+  PROFILE="$HOME/.bash_profile"
+  if ! grep -q "moslime kiosk" "$PROFILE" 2>/dev/null; then
+    cat >> "$PROFILE" <<'KIOSKRC'
+
+# moslime kiosk: on the Pi's own screen (tty1) show the control page full-screen
+if [ -z "${WAYLAND_DISPLAY:-}" ] && [ "$(tty)" = /dev/tty1 ]; then
+  until wget -q --spider http://localhost:8080; do sleep 1; done
+  exec cage -s -- chromium --kiosk --noerrdialogs --disable-infobars --no-first-run --ozone-platform=wayland http://localhost:8080
+fi
+KIOSKRC
+  fi
+fi
+
 cat <<DONE
 
 Installed in: $DIR
@@ -158,6 +188,7 @@ Next steps
   2. Put the six MAC addresses (and the PC's IP) in:  $CONFIG
   3. Run it:     cd "$DIR" && ./moslime --headless
 $( [ "$SERVICE" -eq 1 ] && echo "     or start the service:  sudo systemctl start moslime   (logs: journalctl -u moslime -f)" )
+$( [ "$KIOSK" -eq 1 ] && echo "  5. Kiosk: reboot the Pi. The control page then opens full-screen on its screen. SSH in or press Ctrl+Alt+F2 to get a console." )
   4. The control page is at  http://<this Pi's IP>:8080
 
 If it says the Bluetooth adapter can't be used, log out and back in once

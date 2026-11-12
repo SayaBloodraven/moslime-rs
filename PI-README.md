@@ -15,7 +15,16 @@ the script before running it (a good habit), download it first:
 It installs the Bluetooth packages, downloads the newest release into
 `~/moslime-rs`, creates `config_six.json` (asks for your PC's IP) and, with
 `--service`, sets up auto-start. It then prints the pairing steps below.
-Use `--build` to compile from source instead. The manual steps follow.
+Use `--build` to compile from source instead.
+
+If the Pi has its own touch screen (no desktop needed), add `--kiosk`:
+
+    bash <(wget -qO- https://moslime.bloodraven.net) --service --kiosk
+
+It installs a tiny single-app display (`cage`) and a browser, turns on console
+auto-login and opens the control page full-screen after a reboot. This part is
+untested; screen rotation or touch alignment may need adjusting for your
+screen. The manual steps follow.
 
 ## 1. Prepare the Pi
     sudo apt update
