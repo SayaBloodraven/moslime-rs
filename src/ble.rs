@@ -168,6 +168,7 @@ pub async fn scan_acquire(_adapter: &Adapter) {}
 pub async fn scan_release(_adapter: &Adapter) {}
 
 /// Returns (name, address) for every device whose name starts with "QM-SS1".
+#[allow(dead_code)] // used by the GUI build only
 pub async fn scan_trackers(cell: &OnceCell<Adapter>, secs: u64) -> Result<Vec<(String, String)>> {
     let adapter = shared_adapter(cell).await?;
     scan_acquire(&adapter).await;
@@ -177,6 +178,7 @@ pub async fn scan_trackers(cell: &OnceCell<Adapter>, secs: u64) -> Result<Vec<(S
     result
 }
 
+#[allow(dead_code)]
 async fn collect_trackers(adapter: &Adapter) -> Result<Vec<(String, String)>> {
     let mut out = Vec::new();
     for p in adapter.peripherals().await? {

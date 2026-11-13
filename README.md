@@ -26,16 +26,27 @@ Prebuilt files come from the GitHub Actions build.
 ## Status / known limitations
 - **Raspberry Pi 4B + TP-Link UB500 Plus (Linux, headless):** tested with six
   mocopi pucks. The pairing helper (`--setup`), streaming to SlimeVR, the web
-  control page, Stop/Start of single pucks and of all pucks, and auto-start
-  after a reboot all work. A puck occasionally takes a while to connect after a
-  start (they advertise in bursts); the bridge keeps retrying.
+  control page (with each puck's battery level), Stop/Start of single pucks and
+  of all pucks, the touch-screen kiosk, and auto-start after a reboot all work.
+  Six pucks ran for 11 hours without a drop. A puck occasionally takes a while
+  to connect after a start (they advertise in bursts); the bridge keeps retrying.
+- **Known issue (Linux): stopping or reconnecting one puck can briefly drop one
+  or two others.** Opening a new Bluetooth connection while five others are
+  live can make the adapter lose another link. They reconnect by themselves,
+  usually within about 30 seconds (the bridge slows its retries when several
+  are down so it settles). Pucks with low batteries make this much worse, so
+  keep them charged. Splitting the pucks over two adapters should fix it; that
+  is planned.
+- **Adapter choice:** `"adapter"` in the config can be the adapter's Bluetooth
+  address (`moslime --list-adapters` shows them). Use the address: Linux can
+  swap the `hci0`/`hci1` names between boots.
 - **Windows:** all six pucks connect from a fresh boot. After a puck is stopped
   (or the app is closed), Windows may refuse to reconnect it until the PC is
   restarted ("Not connected ... GATT status: Unreachable"). The cause is not
   understood; the original Python moslime behaves the same way. Details in
   [WINDOWS-README.md](WINDOWS-README.md). Linux does not have this problem.
-- **Not tested yet:** the touch-screen kiosk (`install.sh --kiosk`), other
-  Linux distributions, and more than six pucks (a second adapter).
+- **Not tested yet:** other Linux distributions, and more than six pucks (a
+  second adapter).
 - Tested with a TP-Link UB500 Plus adapter. Other adapters (especially some
   built-in ones) may struggle with six trackers; try Compatibility Mode.
 - The web control page has no password; anyone on your network can use it.

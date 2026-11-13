@@ -8,7 +8,9 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, Context, Result};
-use btleplug::api::{Central, CharPropFlags, Peripheral as _, ScanFilter, WriteType};
+use btleplug::api::{Central, CharPropFlags, Peripheral as _, WriteType};
+#[cfg(not(target_os = "linux"))]
+use btleplug::api::ScanFilter;
 use btleplug::platform::{Adapter, Peripheral};
 use futures::StreamExt;
 use tokio::net::UdpSocket;
@@ -84,6 +86,7 @@ pub struct ConnectGate {
     parallel: Semaphore,
     serial: Semaphore,
     pub compat: AtomicBool,
+    #[allow(dead_code)] // only used where the scan stays on (not Linux)
     scan_refreshed: Mutex<Instant>,
     /// When trackers recently failed to connect/stream (for the retry brake).
     failures: Mutex<Vec<Instant>>,
@@ -123,6 +126,7 @@ impl ConnectGate {
 
     /// True for at most one caller per 10 seconds, so six trackers that all
     /// can't find their puck don't each restart the shared scan.
+    #[allow(dead_code)]
     fn claim_scan_refresh(&self) -> bool {
         match self.scan_refreshed.lock() {
             Ok(mut t) if t.elapsed() > Duration::from_secs(10) => {

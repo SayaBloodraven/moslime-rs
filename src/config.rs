@@ -75,6 +75,7 @@ impl Default for Config {
 
 pub struct Settings {
     /// Always TRACKERS long; missing entries are filled with placeholders (GUI).
+    #[allow(dead_code)] // read by the GUI build only
     pub macs: Vec<String>,
     /// Exactly what the file contains (headless mode uses only these).
     pub configured: Vec<String>,
