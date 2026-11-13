@@ -264,6 +264,17 @@ impl eframe::App for App {
                                 } else {
                                     v.message.as_str()
                                 });
+                            if let Some(b) = v.battery {
+                                let color = if b < 10 {
+                                    egui::Color32::from_rgb(224, 80, 80)
+                                } else if b < 25 {
+                                    egui::Color32::from_rgb(224, 160, 48)
+                                } else {
+                                    egui::Color32::GRAY
+                                };
+                                ui.colored_label(color, format!("{b}%"))
+                                    .on_hover_text("Battery");
+                            }
                         });
 
                         ui.monospace(format!(
