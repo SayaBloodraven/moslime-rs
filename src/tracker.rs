@@ -28,7 +28,12 @@ const START_STREAM_CMD: [u8; 7] = [0x7e, 0x03, 0x18, 0xd6, 0x01, 0x00, 0x00];
 const FIND_TIMEOUT: Duration = Duration::from_secs(15);
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 /// No data for this long on a "connected" tracker => treat as dead and reconnect.
+#[cfg(windows)]
 const STALE_AFTER: Duration = Duration::from_secs(5);
+/// Linux: BlueZ reports a really dead link itself, and a puck can go quiet for
+/// several seconds while another puck connects, so be more patient.
+#[cfg(not(windows))]
+const STALE_AFTER: Duration = Duration::from_secs(10);
 const BACKOFF_MIN: Duration = Duration::from_secs(1);
 const BACKOFF_MAX: Duration = Duration::from_secs(15);
 /// Cap for "puck not advertising / BlueZ busy" failures.
