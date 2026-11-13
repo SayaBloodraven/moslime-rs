@@ -380,7 +380,7 @@ mod linux {
 
         // Remember which adapter holds the pairings (only matters with several).
         if adapters.len() > 1 {
-            config::save_adapter(&adapter.name)?;
+            config::save_adapter(&adapter.address.to_string())?;
         }
 
         if settings.server == config::DEFAULT_SERVER {

@@ -29,7 +29,8 @@ pub fn list_adapters(rt: &Runtime) -> Result<()> {
         println!("{i}: {n}");
     }
     println!();
-    println!("To pick one, put part of its description in config_six.json, e.g.  \"adapter\": \"hci1\"");
+    println!("To pick one, put its address (or part of its description) in config_six.json, e.g.");
+    println!("  \"adapter\": \"58:D8:12:11:EA:79\"   (the address stays the same; hci0/hci1 can swap between boots)");
     Ok(())
 }
 

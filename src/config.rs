@@ -40,8 +40,8 @@ struct Config {
     /// Where the SlimeVR server listens, "IP:PORT" (port defaults to 6969).
     #[serde(default = "default_server")]
     server: String,
-    /// Optional text that must appear in the Bluetooth adapter's description,
-    /// e.g. "hci1". Empty = use the first adapter.
+    /// Which Bluetooth adapter to use: its address (preferred, e.g.
+    /// "58:D8:12:11:EA:79") or text from its description. Empty = first adapter.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     adapter: Option<String>,
     /// Headless mode: port of the touch/browser control page. 0 = off.

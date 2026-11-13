@@ -13,18 +13,81 @@ pub fn set_adapter_hint(hint: Option<String>) {
     let _ = ADAPTER_HINT.set(hint.filter(|h| !h.trim().is_empty()));
 }
 
+/// True for text shaped like a Bluetooth address (aa:bb:cc:dd:ee:ff).
+fn looks_like_address(h: &str) -> bool {
+    let parts: Vec<&str> = h.trim().split(':').collect();
+    parts.len() == 6
+        && parts
+            .iter()
+            .all(|p| p.len() == 2 && p.chars().all(|c| c.is_ascii_hexdigit()))
+}
+
+/// Linux numbers adapters (hci0, hci1) in whatever order they came up, and
+/// the order can change between boots. An address in the config is stable, so
+/// turn it into the adapter's current name ("hci0") before matching.
+#[cfg(target_os = "linux")]
+async fn resolve_hint(h: &str) -> Result<String> {
+    if !looks_like_address(h) {
+        return Ok(h.to_string());
+    }
+    let session = bluer::Session::new().await?;
+    let mut seen = Vec::new();
+    for name in session.adapter_names().await? {
+        if let Ok(a) = session.adapter(&name) {
+            if let Ok(addr) = a.address().await {
+                if addr.to_string().eq_ignore_ascii_case(h.trim()) {
+                    // Trailing space so "hci1" can never match "hci10".
+                    return Ok(format!("{name} "));
+                }
+                seen.push(format!("{name} {addr}"));
+            }
+        }
+    }
+    Err(anyhow!(
+        "no Bluetooth adapter with address {h}; available: {}",
+        seen.join(", ")
+    ))
+}
+
+#[cfg(not(target_os = "linux"))]
+async fn resolve_hint(h: &str) -> Result<String> {
+    Ok(h.to_string())
+}
+
 /// Descriptions of every Bluetooth adapter, e.g. "hci1 (usb:v0BDApB85Bd0200)".
 pub async fn adapter_names() -> Result<Vec<String>> {
     let manager = Manager::new().await?;
     let mut out = Vec::new();
     for a in manager.adapters().await? {
-        out.push(a.adapter_info().await.unwrap_or_else(|_| "(unknown)".to_string()));
+        let info = a.adapter_info().await.unwrap_or_else(|_| "(unknown)".to_string());
+        out.push(with_address(info).await);
     }
     Ok(out)
 }
 
 pub async fn adapter_label(a: &Adapter) -> String {
-    a.adapter_info().await.unwrap_or_else(|_| "unknown".to_string())
+    let info = a.adapter_info().await.unwrap_or_else(|_| "unknown".to_string());
+    with_address(info).await
+}
+
+/// Linux: add the adapter's Bluetooth address to its description, so the
+/// address (which stays the same across boots) can be copied into the config.
+#[cfg(target_os = "linux")]
+async fn with_address(info: String) -> String {
+    let name = info.split_whitespace().next().unwrap_or("").to_string();
+    if let Ok(session) = bluer::Session::new().await {
+        if let Ok(a) = session.adapter(&name) {
+            if let Ok(addr) = a.address().await {
+                return format!("{info} [{addr}]");
+            }
+        }
+    }
+    info
+}
+
+#[cfg(not(target_os = "linux"))]
+async fn with_address(info: String) -> String {
+    info
 }
 
 /// One adapter shared by every tracker task. The scan is started once and
@@ -44,7 +107,7 @@ pub async fn shared_adapter(cell: &OnceCell<Adapter>) -> Result<Adapter> {
             let adapter = match hint {
                 None => adapters.into_iter().next().expect("checked non-empty"),
                 Some(h) => {
-                    let wanted = h.to_lowercase();
+                    let wanted = resolve_hint(&h).await?.to_lowercase();
                     let mut found = None;
                     let mut seen = Vec::new();
                     for a in adapters {

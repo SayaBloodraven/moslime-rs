@@ -108,7 +108,9 @@ else
   . "$HOME/.cargo/env"
   SRC="$DIR/source"
   if [ -d "$SRC/.git" ]; then
-    git -C "$SRC" pull --ff-only
+    # Switch to the requested tag/branch (or main), not just whatever was cloned first.
+    git -C "$SRC" fetch --depth 1 origin "${TAG:-main}"
+    git -C "$SRC" checkout -q -f FETCH_HEAD
   else
     git clone --depth 1 ${TAG:+--branch "$TAG"} "https://github.com/${REPO}" "$SRC"
   fi
