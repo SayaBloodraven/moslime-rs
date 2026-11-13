@@ -419,6 +419,8 @@ async fn stream(
     ctx.note("streaming");
 
     let mut last_rx = Instant::now();
+    let mut last_nudge = Instant::now();
+    let mut nudged = false;
     let mut watchdog = tokio::time::interval(Duration::from_secs(1));
 
     // If SlimeVR wasn't running (or its first reply got lost) when we sent the
@@ -441,6 +443,10 @@ async fn stream(
                     continue;
                 }
                 last_rx = Instant::now();
+                if nudged {
+                    nudged = false;
+                    ctx.note("data resumed after restart-stream nudge");
+                }
 
                 if let Some((q, a)) = protocol::decode(&n.value) {
                     *pcounter += 1;
@@ -473,6 +479,19 @@ async fn stream(
             _ = watchdog.tick() => {
                 if last_rx.elapsed() > STALE_AFTER {
                     return Err(anyhow!("no data for {}s", STALE_AFTER.as_secs()));
+                }
+                // A short silence is often just the puck pausing. Ask it to
+                // start streaming again over the existing link before giving
+                // up: a reconnect costs radio time that disturbs the others.
+                if last_rx.elapsed() >= Duration::from_secs(3)
+                    && last_nudge.elapsed() >= Duration::from_secs(3)
+                {
+                    last_nudge = Instant::now();
+                    if !nudged {
+                        nudged = true;
+                        ctx.note("silent for 3s - sending the start-stream command again");
+                    }
+                    let _ = p.write(&cmd_char, &START_STREAM_CMD, write_type).await;
                 }
                 if !registered && last_announce.elapsed() >= Duration::from_secs(3) {
                     if !warned {
