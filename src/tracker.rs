@@ -16,6 +16,7 @@ use tokio::sync::{Semaphore, SemaphorePermit};
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
+use crate::ble;
 use crate::protocol::{self, Quat};
 #[cfg(windows)]
 use crate::winbt;
@@ -241,6 +242,22 @@ async fn find_peripheral(
     cancel: &CancellationToken,
     gate: &ConnectGate,
 ) -> Result<Peripheral> {
+    let mut scanning = false;
+    let result = find_loop(adapter, mac, timeout, cancel, gate, &mut scanning).await;
+    if scanning {
+        ble::scan_release(adapter).await;
+    }
+    result
+}
+
+async fn find_loop(
+    adapter: &Adapter,
+    mac: &str,
+    timeout: Duration,
+    cancel: &CancellationToken,
+    gate: &ConnectGate,
+    scanning: &mut bool,
+) -> Result<Peripheral> {
     let started = Instant::now();
     let deadline = started + timeout;
     loop {
@@ -249,12 +266,23 @@ async fn find_peripheral(
                 return Ok(p);
             }
         }
-        // Not found for a few seconds: the OS scan may have gone stale, so
-        // restart it (rate-limited across all trackers).
+        // Linux: a paired puck is normally known to BlueZ already. Only if it is
+        // missing do we switch the scan on (and off again when we are done).
+        #[cfg(target_os = "linux")]
+        if !*scanning {
+            ble::scan_acquire(adapter).await;
+            *scanning = true;
+        }
+        // Elsewhere: not found for a few seconds means the OS scan may have gone
+        // stale, so restart it (rate-limited across all trackers).
+        #[cfg(not(target_os = "linux"))]
         if started.elapsed() > Duration::from_secs(4) && gate.claim_scan_refresh() {
             let _ = adapter.stop_scan().await;
             let _ = adapter.start_scan(ScanFilter::default()).await;
         }
+        #[cfg(target_os = "linux")]
+        let _ = gate; // only used for the non-Linux scan refresh
+        let _ = &scanning;
         if Instant::now() > deadline {
             return Err(anyhow!("tracker {mac} not seen in scan"));
         }

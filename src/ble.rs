@@ -63,6 +63,10 @@ pub async fn shared_adapter(cell: &OnceCell<Adapter>) -> Result<Adapter> {
                     })?
                 }
             };
+            // Linux: scanning is switched on only while somebody needs it (see
+            // scan_acquire), because a permanent scan in a busy neighbourhood
+            // steals radio time from the connected pucks. Elsewhere it stays on.
+            #[cfg(not(target_os = "linux"))]
             adapter.start_scan(ScanFilter::default()).await?;
             Ok::<Adapter, anyhow::Error>(adapter)
         })
@@ -70,11 +74,47 @@ pub async fn shared_adapter(cell: &OnceCell<Adapter>) -> Result<Adapter> {
     Ok(adapter.clone())
 }
 
+/// Number of users that currently want the Bluetooth scan on (Linux only).
+#[cfg(target_os = "linux")]
+static SCAN_USERS: tokio::sync::Mutex<usize> = tokio::sync::Mutex::const_new(0);
+
+/// Linux: start scanning if nobody else is. Pair every call with `scan_release`.
+#[cfg(target_os = "linux")]
+pub async fn scan_acquire(adapter: &Adapter) {
+    let mut users = SCAN_USERS.lock().await;
+    if *users == 0 {
+        let _ = adapter.start_scan(ScanFilter::default()).await;
+    }
+    *users += 1;
+}
+
+/// Linux: stop scanning when the last user lets go.
+#[cfg(target_os = "linux")]
+pub async fn scan_release(adapter: &Adapter) {
+    let mut users = SCAN_USERS.lock().await;
+    *users = users.saturating_sub(1);
+    if *users == 0 {
+        let _ = adapter.stop_scan().await;
+    }
+}
+
+/// Other systems keep the scan running all the time, so these do nothing.
+#[cfg(not(target_os = "linux"))]
+pub async fn scan_acquire(_adapter: &Adapter) {}
+#[cfg(not(target_os = "linux"))]
+pub async fn scan_release(_adapter: &Adapter) {}
+
 /// Returns (name, address) for every device whose name starts with "QM-SS1".
 pub async fn scan_trackers(cell: &OnceCell<Adapter>, secs: u64) -> Result<Vec<(String, String)>> {
     let adapter = shared_adapter(cell).await?;
+    scan_acquire(&adapter).await;
     tokio::time::sleep(Duration::from_secs(secs)).await;
+    let result = collect_trackers(&adapter).await;
+    scan_release(&adapter).await;
+    result
+}
 
+async fn collect_trackers(adapter: &Adapter) -> Result<Vec<(String, String)>> {
     let mut out = Vec::new();
     for p in adapter.peripherals().await? {
         let Some(props) = p.properties().await? else {
