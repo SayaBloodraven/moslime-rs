@@ -25,6 +25,7 @@ BUILD=0
 SERVICE=0
 KIOSK=0
 PAIR=0
+PAIRED=0
 
 usage() {
   cat <<'USAGE'
@@ -86,6 +87,15 @@ getent group bluetooth >/dev/null && sudo usermod -aG bluetooth "$USER" || true
 
 mkdir -p "$DIR"
 
+# A running program can't be overwritten ("Text file busy"): stop the service
+# while we replace it, and start it again at the end.
+WAS_ACTIVE=0
+if systemctl is-active --quiet moslime 2>/dev/null; then
+  WAS_ACTIVE=1
+  say "Stopping the running moslime service while it is updated"
+  sudo systemctl stop moslime
+fi
+
 if [ "$BUILD" -eq 0 ]; then
   if [ -z "$TAG" ]; then
     say "Looking up the newest release"
@@ -115,7 +125,8 @@ else
     git clone --depth 1 ${TAG:+--branch "$TAG"} "https://github.com/${REPO}" "$SRC"
   fi
   (cd "$SRC" && cargo build --release --no-default-features)
-  cp "$SRC/target/release/moslime" "$DIR/moslime"
+  cp "$SRC/target/release/moslime" "$DIR/moslime.new"
+  mv -f "$DIR/moslime.new" "$DIR/moslime"
   cp "$SRC/config_six.example.json" "$SRC/moslime.service" "$SRC/PI-README.md" "$DIR/"
 fi
 chmod +x "$DIR/moslime"
@@ -188,20 +199,22 @@ if [ "$PAIR" -eq 0 ] && [ -r /dev/tty ]; then
 fi
 if [ "$PAIR" -eq 1 ]; then
   say "Pairing your pucks"
-  PAIRED=0
   if [ -r /dev/tty ]; then
     "$DIR/moslime" --setup < /dev/tty && PAIRED=1
   else
     "$DIR/moslime" --setup && PAIRED=1
   fi
-  if [ "$PAIRED" -eq 1 ]; then
-    if [ "$SERVICE" -eq 1 ]; then
-      say "Starting the bridge service"
-      sudo systemctl restart moslime
-      echo "Running. Logs: journalctl -u moslime -f"
-    fi
-  else
+  if [ "$PAIRED" -ne 1 ]; then
     echo "Pairing did not finish. Run it again any time:  cd $DIR && ./moslime --setup"
+  fi
+fi
+
+# Start (or restart) the service unless pairing was attempted and failed.
+if [ "$SERVICE" -eq 1 ] || [ "$WAS_ACTIVE" -eq 1 ]; then
+  if [ "$PAIR" -eq 0 ] || [ "$PAIRED" -eq 1 ]; then
+    say "Starting the bridge service"
+    sudo systemctl restart moslime
+    echo "Running. Logs: journalctl -u moslime -f"
   fi
 fi
 
