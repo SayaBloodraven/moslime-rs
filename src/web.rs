@@ -173,6 +173,9 @@ main{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:
 .msg{color:#b8bcc2;font-size:13px;min-height:2.6em;margin:8px 0;word-break:break-word}
 .row{display:flex;align-items:center;justify-content:space-between}
 .pk{color:#9aa0a8;font-size:13px}
+.bat{font-size:13px;color:#9aa0a8;margin:0 10px;flex:1;text-align:right}
+.bat.low{color:#e0a030;font-weight:600}
+.bat.crit{color:#e05050;font-weight:700}
 </style></head><body>
 <header>
   <div><h1>Mocopi bridge</h1><button id="srv" title="Change the PC address"></button></div>
@@ -227,7 +230,7 @@ function ensure(t) {
   el.className = 'card';
   el.innerHTML = '<div class="top"><b class="num"></b><span class="sid"></span><span class="mac"></span><span class="badge"></span></div>' +
                  '<div class="msg"></div>' +
-                 '<div class="row"><span class="pk"></span><button></button></div>';
+                 '<div class="row"><span class="pk"></span><span class="bat"></span><button></button></div>';
   const c = {el: el, t: t};
   el.querySelector('button').onclick = function () {
     post('/api/' + (c.t.running ? 'stop' : 'start') + '/' + c.t.id);
@@ -249,6 +252,14 @@ function render(d) {
     c.el.querySelector('.badge').textContent = t.status;
     c.el.querySelector('.msg').textContent = t.message;
     c.el.querySelector('.pk').textContent = t.packets + ' packets';
+    const bat = c.el.querySelector('.bat');
+    if (t.battery >= 0) {
+      bat.textContent = 'Battery ' + t.battery + '%';
+      bat.className = 'bat' + (t.battery < 10 ? ' crit' : t.battery < 25 ? ' low' : '');
+    } else {
+      bat.textContent = '';
+      bat.className = 'bat';
+    }
     const b = c.el.querySelector('button');
     b.textContent = t.running ? 'Stop' : 'Start';
     b.className = t.running ? 'stop' : 'start';

@@ -23,6 +23,10 @@ use crate::winbt;
 
 const DATA_CHAR_UUID: Uuid = Uuid::from_u128(0x25047e64_657c_4856_afcf_e315048a965b);
 const CMD_CHAR_UUID: Uuid = Uuid::from_u128(0x0000ff01_0000_1000_8000_00805f9b34fb);
+/// Standard Bluetooth Battery Level (0-100 %).
+const BATTERY_CHAR_UUID: Uuid = Uuid::from_u128(0x00002a19_0000_1000_8000_00805f9b34fb);
+/// How often the battery level is re-read (one tiny read; kept rare on purpose).
+const BATTERY_EVERY: Duration = Duration::from_secs(300);
 const START_STREAM_CMD: [u8; 7] = [0x7e, 0x03, 0x18, 0xd6, 0x01, 0x00, 0x00];
 
 const FIND_TIMEOUT: Duration = Duration::from_secs(15);
@@ -54,6 +58,8 @@ pub struct TrackerView {
     pub message: String,
     /// Printed ID of the puck ("QM-SS1 170E9" -> "170E9"); empty until known.
     pub id: String,
+    /// Battery level in percent, when the puck has reported it.
+    pub battery: Option<u8>,
 }
 
 impl Default for TrackerView {
@@ -64,6 +70,7 @@ impl Default for TrackerView {
             packets: 0,
             message: String::new(),
             id: String::new(),
+            battery: None,
         }
     }
 }
@@ -78,6 +85,8 @@ pub struct ConnectGate {
     serial: Semaphore,
     pub compat: AtomicBool,
     scan_refreshed: Mutex<Instant>,
+    /// When trackers recently failed to connect/stream (for the retry brake).
+    failures: Mutex<Vec<Instant>>,
 }
 
 pub struct ConnectPermit<'a> {
@@ -92,6 +101,23 @@ impl ConnectGate {
             serial: Semaphore::new(1),
             compat: AtomicBool::new(false),
             scan_refreshed: Mutex::new(Instant::now()),
+            failures: Mutex::new(Vec::new()),
+        }
+    }
+
+    /// Records a failure and returns how many trackers failed in the last 20 s.
+    /// Used to slow retries down when several pucks are down at once: every
+    /// connect attempt costs radio time that the still-connected pucks need.
+    #[allow(dead_code)]
+    fn note_failure(&self) -> usize {
+        match self.failures.lock() {
+            Ok(mut f) => {
+                let now = Instant::now();
+                f.retain(|t| now.duration_since(*t) < Duration::from_secs(20));
+                f.push(now);
+                f.len()
+            }
+            Err(_) => 1,
         }
     }
 
@@ -213,11 +239,33 @@ pub async fn run_tracker(ctx: TrackerCtx) {
         } else {
             (backoff * 2).min(cap)
         };
-        ctx.note(format!("{reason} - retrying in {}s", backoff.as_secs()));
+        // Retry brake (Linux): with several pucks down, retrying them all at
+        // once keeps the radio too busy for the connected ones, so back off
+        // further and stagger the pucks so they don't retry in lockstep.
+        #[cfg(target_os = "linux")]
+        let wait = {
+            let failing = ctx.gate.note_failure();
+            let mut w = backoff + Duration::from_millis(700 * u64::from(ctx.sensor_id));
+            if failing >= 3 {
+                w += Duration::from_secs(((failing as u64 - 2) * 3).min(12));
+                ctx.note(format!(
+                    "{reason} - {failing} pucks down, waiting {}s so the radio can settle",
+                    w.as_secs()
+                ));
+            } else {
+                ctx.note(format!("{reason} - retrying in {}s", backoff.as_secs()));
+            }
+            w
+        };
+        #[cfg(not(target_os = "linux"))]
+        let wait = {
+            ctx.note(format!("{reason} - retrying in {}s", backoff.as_secs()));
+            backoff
+        };
 
         tokio::select! {
             _ = ctx.cancel.cancelled() => break,
-            _ = tokio::time::sleep(backoff) => {}
+            _ = tokio::time::sleep(wait) => {}
         }
     }
 
@@ -418,9 +466,15 @@ async fn stream(
     ctx.set_status(Status::Connected);
     ctx.note("streaming");
 
+    // Battery: read once now, then rarely. Skipped when the puck isn't
+    // delivering data, so it never adds traffic to a link that is struggling.
+    let battery_char = p
+        .characteristics()
+        .into_iter()
+        .find(|c| c.uuid == BATTERY_CHAR_UUID && c.properties.contains(CharPropFlags::READ));
+    let mut last_battery: Option<Instant> = None;
+
     let mut last_rx = Instant::now();
-    let mut last_nudge = Instant::now();
-    let mut nudged = false;
     let mut watchdog = tokio::time::interval(Duration::from_secs(1));
 
     // If SlimeVR wasn't running (or its first reply got lost) when we sent the
@@ -443,10 +497,6 @@ async fn stream(
                     continue;
                 }
                 last_rx = Instant::now();
-                if nudged {
-                    nudged = false;
-                    ctx.note("data resumed after restart-stream nudge");
-                }
 
                 if let Some((q, a)) = protocol::decode(&n.value) {
                     *pcounter += 1;
@@ -480,18 +530,20 @@ async fn stream(
                 if last_rx.elapsed() > STALE_AFTER {
                     return Err(anyhow!("no data for {}s", STALE_AFTER.as_secs()));
                 }
-                // A short silence is often just the puck pausing. Ask it to
-                // start streaming again over the existing link before giving
-                // up: a reconnect costs radio time that disturbs the others.
-                if last_rx.elapsed() >= Duration::from_secs(3)
-                    && last_nudge.elapsed() >= Duration::from_secs(3)
-                {
-                    last_nudge = Instant::now();
-                    if !nudged {
-                        nudged = true;
-                        ctx.note("silent for 3s - sending the start-stream command again");
+                if let Some(bc) = &battery_char {
+                    let due = last_battery.map_or(true, |t| t.elapsed() >= BATTERY_EVERY);
+                    if due && last_rx.elapsed() < Duration::from_secs(2) {
+                        last_battery = Some(Instant::now());
+                        let read = tokio::time::timeout(Duration::from_secs(3), p.read(bc)).await;
+                        if let Ok(Ok(v)) = read {
+                            if let Some(&pct) = v.first() {
+                                if let Ok(mut view) = ctx.view.lock() {
+                                    view.battery = Some(pct.min(100));
+                                }
+                                eprintln!("[tracker #{}] battery {}%", ctx.sensor_id as usize + 1, pct);
+                            }
+                        }
                     }
-                    let _ = p.write(&cmd_char, &START_STREAM_CMD, write_type).await;
                 }
                 if !registered && last_announce.elapsed() >= Duration::from_secs(3) {
                     if !warned {

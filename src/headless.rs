@@ -171,14 +171,20 @@ impl Bridge {
                     .map(|r| !r.cancel.is_cancelled() && !r.handle.is_finished())
                     .unwrap_or(false)
             };
-            let (status, packets, message, sid) = {
+            let (status, packets, message, sid, battery) = {
                 match s.view.lock() {
-                    Ok(v) => (format!("{:?}", v.status), v.packets, v.message.clone(), v.id.clone()),
-                    Err(_) => ("Disconnected".to_string(), 0, String::new(), String::new()),
+                    Ok(v) => (
+                        format!("{:?}", v.status),
+                        v.packets,
+                        v.message.clone(),
+                        v.id.clone(),
+                        v.battery.map_or(-1, i32::from),
+                    ),
+                    Err(_) => ("Disconnected".to_string(), 0, String::new(), String::new(), -1),
                 }
             };
             items.push(format!(
-                "{{\"id\":{i},\"number\":{},\"mac\":\"{}\",\"sid\":\"{}\",\"status\":\"{}\",\"running\":{running},\"packets\":{packets},\"message\":\"{}\"}}",
+                "{{\"id\":{i},\"number\":{},\"mac\":\"{}\",\"sid\":\"{}\",\"status\":\"{}\",\"running\":{running},\"packets\":{packets},\"battery\":{battery},\"message\":\"{}\"}}",
                 s.sensor_id as usize + 1,
                 json_escape(&s.mac),
                 json_escape(&sid),
