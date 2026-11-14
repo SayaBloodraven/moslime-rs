@@ -204,8 +204,16 @@ main{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:
 #ndlg{position:fixed;inset:0;background:#000b;display:flex;align-items:center;justify-content:center;z-index:6}
 #ndlg[hidden]{display:none}
 #nin{width:100%;font:18px system-ui,sans-serif;background:#101215;color:#e8e8e8;border:1px solid #3a3f47;border-radius:8px;padding:12px;margin-bottom:10px}
-.presets{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-bottom:10px}
-.presets button{padding:10px 0;font-size:15px;min-height:44px}
+#ndlg .box{width:min(520px,98vw);max-height:98vh;overflow-y:auto;padding:12px}
+#ndlg h2{margin-bottom:6px}
+#nin{margin-bottom:6px;padding:8px 12px}
+.presets{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:8px}
+.presets button{padding:6px 2px;font-size:13px;min-height:36px;border-radius:8px}
+.krow{display:flex;gap:4px;margin-bottom:4px}
+.krow button{flex:1;min-width:0;padding:0;min-height:38px;font-size:16px;border-radius:8px}
+.krow button.wide{flex:1.6}
+.krow button.space{flex:6}
+#ndlg .bar button{min-height:42px;padding:8px 18px}
 .row{display:flex;align-items:center;justify-content:space-between}
 .pk{color:#9aa0a8;font-size:13px}
 .bat{font-size:13px;color:#9aa0a8;margin:0 10px;flex:1;text-align:right}
@@ -228,6 +236,7 @@ main{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:
   <h2 id="ntitle">Name this puck</h2>
   <input id="nin" maxlength="24" placeholder="Type a name, or pick one" autocomplete="off">
   <div class="presets" id="presets"></div>
+  <div id="kb"></div>
   <div id="nerr" style="color:#e07070;font-size:13px;min-height:1.4em;margin-bottom:8px"></div>
   <div class="bar"><button id="nclr">Clear</button><button id="nc">Cancel</button><button class="start" id="ns">Save</button></div>
 </div></div>
@@ -260,6 +269,44 @@ for (const n of ['Chest','Hip','Left thigh','Right thigh','Left knee','Right kne
   b.textContent = n;
   b.onclick = function () { nin.value = n; };
   document.getElementById('presets').appendChild(b);
+}
+// The Pi's touch screen has no keyboard of its own, so the kiosk page brings one.
+const kb = document.getElementById('kb');
+if (document.documentElement.classList.contains('kiosk')) {
+  nin.readOnly = true;
+  let shift = false;
+  const addKey = function (row, label, cls, fn) {
+    const b = document.createElement('button');
+    b.textContent = label;
+    if (cls) b.className = cls;
+    b.onclick = fn;
+    row.appendChild(b);
+  };
+  const drawKb = function () {
+    kb.innerHTML = '';
+    const rows = ['1234567890', 'qwertyuiop', 'asdfghjkl', 'zxcvbnm'];
+    rows.forEach(function (r, ri) {
+      const row = document.createElement('div');
+      row.className = 'krow';
+      if (ri === 3) addKey(row, shift ? '\u2B06' : '\u21E7', 'wide', function () { shift = !shift; drawKb(); });
+      for (const ch of r) {
+        const c = shift ? ch.toUpperCase() : ch;
+        addKey(row, c, '', function () {
+          if (nin.value.length < 24) nin.value += c;
+          if (shift) { shift = false; drawKb(); }
+        });
+      }
+      if (ri === 3) addKey(row, '\u232B', 'wide', function () { nin.value = nin.value.slice(0, -1); });
+      kb.appendChild(row);
+    });
+    const last = document.createElement('div');
+    last.className = 'krow';
+    addKey(last, '-', '', function () { if (nin.value.length < 24) nin.value += '-'; });
+    addKey(last, 'space', 'space', function () { if (nin.value.length < 24) nin.value += ' '; });
+    addKey(last, '.', '', function () { if (nin.value.length < 24) nin.value += '.'; });
+    kb.appendChild(last);
+  };
+  drawKb();
 }
 function openName(t) {
   nameIdx = t.id; nin.value = t.name || ''; nerr.textContent = '';
