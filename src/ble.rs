@@ -22,6 +22,48 @@ fn looks_like_address(h: &str) -> bool {
             .all(|p| p.len() == 2 && p.chars().all(|c| c.is_ascii_hexdigit()))
 }
 
+/// Self-repair, step 1: switch the adapter's radio off and on again. Clears most
+/// stuck states without touching the Bluetooth service. Linux only.
+#[cfg(target_os = "linux")]
+pub async fn power_cycle(adapter: &Adapter) -> Result<()> {
+    let info = adapter.adapter_info().await.unwrap_or_default();
+    let name = info.split_whitespace().next().unwrap_or("").to_string();
+    let session = bluer::Session::new().await?;
+    let a = session.adapter(&name)?;
+    a.set_powered(false).await?;
+    tokio::time::sleep(Duration::from_secs(2)).await;
+    a.set_powered(true).await?;
+    tokio::time::sleep(Duration::from_secs(1)).await;
+    Ok(())
+}
+
+#[cfg(not(target_os = "linux"))]
+pub async fn power_cycle(_adapter: &Adapter) -> Result<()> {
+    Err(anyhow!("not supported on this system"))
+}
+
+/// Self-repair, step 2: restart the Bluetooth service. This is what fixed the
+/// "every puck times out" state by hand. Needs passwordless sudo (the default
+/// for the `pi` user on Raspberry Pi OS); returns an error if that is missing.
+#[cfg(target_os = "linux")]
+pub async fn restart_bluetooth_service() -> Result<()> {
+    let status = tokio::process::Command::new("sudo")
+        .args(["-n", "systemctl", "restart", "bluetooth"])
+        .status()
+        .await?;
+    if status.success() {
+        tokio::time::sleep(Duration::from_secs(3)).await;
+        Ok(())
+    } else {
+        Err(anyhow!("could not restart the bluetooth service (needs passwordless sudo)"))
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+pub async fn restart_bluetooth_service() -> Result<()> {
+    Err(anyhow!("not supported on this system"))
+}
+
 /// Linux numbers adapters (hci0, hci1) in whatever order they came up, and
 /// the order can change between boots. An address in the config is stable, so
 /// turn it into the adapter's current name ("hci0") before matching.

@@ -66,6 +66,27 @@ impl Bridge {
         self.slots.len()
     }
 
+    /// (pucks that are started, pucks that are streaming right now).
+    pub async fn health(&self) -> (usize, usize) {
+        let mut running = 0;
+        let mut streaming = 0;
+        for s in &self.slots {
+            let on = {
+                let g = s.run.lock().await;
+                g.as_ref()
+                    .map(|r| !r.cancel.is_cancelled() && !r.handle.is_finished())
+                    .unwrap_or(false)
+            };
+            if on {
+                running += 1;
+                if s.view.lock().map(|v| v.status == Status::Connected).unwrap_or(false) {
+                    streaming += 1;
+                }
+            }
+        }
+        (running, streaming)
+    }
+
     /// Start tracker `i` (index into the configured list). No-op if running.
     pub async fn start(&self, i: usize) -> Result<()> {
         let slot = self.slots.get(i).context("no such tracker")?;
@@ -384,11 +405,47 @@ pub fn run(rt: &Runtime) -> Result<()> {
         let mut tick = tokio::time::interval(Duration::from_secs(30));
         tick.tick().await; // the first tick fires immediately; skip it
 
+        // Self-repair when the Bluetooth side is stuck: if two or more pucks are
+        // started but none has streamed for 90 s, first switch the adapter's radio
+        // off and on, then (if still stuck 90 s later) restart the Bluetooth
+        // service. Pucks that are simply switched off look the same, so after the
+        // two steps it waits ~10 minutes before trying again. Never acts while
+        // any puck is streaming.
+        let mut stuck_ticks: u32 = 0;
+        let mut repair_stage: u8 = 0;
+
         loop {
             tokio::select! {
                 _ = &mut shutdown => break,
                 _ = tick.tick() => {
                     eprintln!("{}", bridge.summary());
+
+                    let (running, streaming) = bridge.health().await;
+                    if running >= 2 && streaming == 0 {
+                        stuck_ticks += 1;
+                    } else {
+                        stuck_ticks = 0;
+                        repair_stage = 0;
+                    }
+                    if stuck_ticks >= 3 && repair_stage == 0 {
+                        eprintln!("[repair] no puck has connected for 90s - switching the Bluetooth adapter off and on");
+                        if let Err(e) = ble::power_cycle(&bridge.adapter).await {
+                            eprintln!("[repair] adapter reset failed: {e:#}");
+                        }
+                        repair_stage = 1;
+                        stuck_ticks = 0;
+                    } else if stuck_ticks >= 3 && repair_stage == 1 {
+                        eprintln!("[repair] still nothing - restarting the Bluetooth service");
+                        if let Err(e) = ble::restart_bluetooth_service().await {
+                            eprintln!("[repair] {e:#}");
+                        }
+                        repair_stage = 2;
+                        stuck_ticks = 0;
+                    } else if stuck_ticks >= 20 && repair_stage == 2 {
+                        // Still stuck 10 minutes later (or the pucks are just off): start over.
+                        repair_stage = 0;
+                        stuck_ticks = 0;
+                    }
                     // Remember newly seen puck IDs so they show immediately next time.
                     let ids = bridge.known_ids();
                     if !ids.is_empty() && ids != last_saved && config::save_ids(&ids).is_ok() {
