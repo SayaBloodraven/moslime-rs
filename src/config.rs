@@ -50,6 +50,9 @@ struct Config {
     /// Printed ID of each puck (the part after "QM-SS1 "), keyed by MAC.
     #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
     ids: BTreeMap<String, String>,
+    /// Your own name for each puck ("Left foot"), keyed by MAC.
+    #[serde(default, skip_serializing_if = "BTreeMap::is_empty")]
+    names: BTreeMap<String, String>,
 }
 
 fn default_web_port() -> u16 {
@@ -69,6 +72,7 @@ impl Default for Config {
             adapter: None,
             web_port: default_web_port(),
             ids: BTreeMap::new(),
+            names: BTreeMap::new(),
         }
     }
 }
@@ -84,6 +88,7 @@ pub struct Settings {
     pub adapter: Option<String>,
     pub web_port: u16,
     pub ids: BTreeMap<String, String>,
+    pub names: BTreeMap<String, String>,
 }
 
 pub fn exists() -> bool {
@@ -114,6 +119,7 @@ pub fn load() -> Settings {
         adapter: cfg.adapter.filter(|a| !a.trim().is_empty()),
         web_port: cfg.web_port,
         ids: cfg.ids,
+        names: cfg.names,
     }
 }
 
@@ -132,6 +138,19 @@ pub fn save_ids(ids: &BTreeMap<String, String>) -> Result<()> {
     let mut cfg = read();
     for (mac, id) in ids {
         cfg.ids.insert(mac.to_uppercase(), id.clone());
+    }
+    std::fs::write(CONFIG_FILE, serde_json::to_string_pretty(&cfg)?)?;
+    Ok(())
+}
+
+/// Saves (or, when empty, removes) the name of one puck.
+pub fn save_name(mac: &str, name: &str) -> Result<()> {
+    let mut cfg = read();
+    let key = mac.to_uppercase();
+    if name.is_empty() {
+        cfg.names.remove(&key);
+    } else {
+        cfg.names.insert(key, name.to_string());
     }
     std::fs::write(CONFIG_FILE, serde_json::to_string_pretty(&cfg)?)?;
     Ok(())

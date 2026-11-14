@@ -61,6 +61,12 @@ async fn handle(mut sock: TcpStream, bridge: Arc<Bridge>) -> Result<()> {
         .map(percent_decode)
         .unwrap_or_default();
 
+    let name = query
+        .split('&')
+        .find_map(|kv| kv.strip_prefix("name="))
+        .map(percent_decode)
+        .unwrap_or_default();
+
     let (status, ctype, body): (&str, &str, String) = match (method, path) {
         ("GET" | "HEAD", "/") | ("GET" | "HEAD", "/index.html") => ("200 OK", "text/html; charset=utf-8", PAGE.to_string()),
         ("GET" | "HEAD", "/api/status") => ("200 OK", "application/json", bridge.status_json().await),
@@ -75,6 +81,16 @@ async fn handle(mut sock: TcpStream, bridge: Arc<Bridge>) -> Result<()> {
         ("POST", "/api/stop_all") => {
             bridge.stop_all().await;
             ("200 OK", "application/json", bridge.status_json().await)
+        }
+        ("POST", p) if p.starts_with("/api/name/") => {
+            let id = p.rsplit('/').next().and_then(|n| n.parse::<usize>().ok());
+            match id {
+                Some(i) if i < bridge.count() => match bridge.set_name(i, &name).await {
+                    Ok(()) => ("200 OK", "application/json", bridge.status_json().await),
+                    Err(e) => ("400 Bad Request", "text/plain", format!("{e:#}")),
+                },
+                _ => ("404 Not Found", "text/plain", "no such tracker".to_string()),
+            }
         }
         ("POST", p) if p.starts_with("/api/start/") || p.starts_with("/api/stop/") => {
             let starting = p.starts_with("/api/start/");
@@ -171,6 +187,13 @@ main{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:
 .mac{color:#9aa0a8;font-family:ui-monospace,monospace;font-size:13px;flex:1}
 .badge{font-size:13px}
 .msg{color:#b8bcc2;font-size:13px;min-height:2.6em;margin:8px 0;word-break:break-word}
+.nm{font-weight:600;font-size:15px;margin-top:6px;min-height:1.4em;cursor:pointer}
+.nm.empty{color:#6c727a;font-weight:400;font-size:13px}
+#ndlg{position:fixed;inset:0;background:#000b;display:flex;align-items:center;justify-content:center;z-index:6}
+#ndlg[hidden]{display:none}
+#nin{width:100%;font:18px system-ui,sans-serif;background:#101215;color:#e8e8e8;border:1px solid #3a3f47;border-radius:8px;padding:12px;margin-bottom:10px}
+.presets{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-bottom:10px}
+.presets button{padding:10px 0;font-size:15px;min-height:44px}
 .row{display:flex;align-items:center;justify-content:space-between}
 .pk{color:#9aa0a8;font-size:13px}
 .bat{font-size:13px;color:#9aa0a8;margin:0 10px;flex:1;text-align:right}
@@ -188,6 +211,13 @@ main{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:
   <div class="keys" id="keys"></div>
   <div id="derr"></div>
   <div class="bar"><button id="dback">&#9003;</button><button id="dclr">Clear</button><button id="dc">Cancel</button><button class="start" id="ds">Save</button></div>
+</div></div>
+<div id="ndlg" hidden><div class="box">
+  <h2 id="ntitle">Name this puck</h2>
+  <input id="nin" maxlength="24" placeholder="Type a name, or pick one" autocomplete="off">
+  <div class="presets" id="presets"></div>
+  <div id="nerr" style="color:#e07070;font-size:13px;min-height:1.4em;margin-bottom:8px"></div>
+  <div class="bar"><button id="nclr">Clear</button><button id="nc">Cancel</button><button class="start" id="ns">Save</button></div>
 </div></div>
 <script>
 // Opened by the Pi's kiosk browser (address ends in ?kiosk=1): hide the mouse pointer.
@@ -209,6 +239,32 @@ for (const k of ['1','2','3','4','5','6','7','8','9','.','0',':']) {
 document.getElementById('srv').onclick = function () {
   entry = curServer; derr.textContent = ''; showEntry(); dlg.hidden = false;
 };
+const ndlg = document.getElementById('ndlg');
+const nin = document.getElementById('nin');
+const nerr = document.getElementById('nerr');
+let nameIdx = -1;
+for (const n of ['Chest','Hip','Left thigh','Right thigh','Left knee','Right knee','Left foot','Right foot','Left elbow','Right elbow','Upper chest','Waist']) {
+  const b = document.createElement('button');
+  b.textContent = n;
+  b.onclick = function () { nin.value = n; };
+  document.getElementById('presets').appendChild(b);
+}
+function openName(t) {
+  nameIdx = t.id; nin.value = t.name || ''; nerr.textContent = '';
+  document.getElementById('ntitle').textContent = 'Name for #' + t.number + (t.sid ? '  (' + t.sid + ')' : '');
+  ndlg.hidden = false;
+}
+async function saveName(text) {
+  nerr.textContent = 'Saving...';
+  try {
+    const r = await fetch('/api/name/' + nameIdx + '?name=' + encodeURIComponent(text), {method: 'POST'});
+    if (r.ok) { ndlg.hidden = true; refresh(); }
+    else { nerr.textContent = await r.text(); }
+  } catch (e) { nerr.textContent = 'Could not reach the bridge'; }
+}
+document.getElementById('ns').onclick = function () { saveName(nin.value); };
+document.getElementById('nclr').onclick = function () { saveName(''); };
+document.getElementById('nc').onclick = function () { ndlg.hidden = true; };
 document.getElementById('dback').onclick = function () { entry = entry.slice(0, -1); showEntry(); };
 document.getElementById('dclr').onclick = function () { entry = ''; showEntry(); };
 document.getElementById('dc').onclick = function () { dlg.hidden = true; };
@@ -229,12 +285,14 @@ function ensure(t) {
   const el = document.createElement('div');
   el.className = 'card';
   el.innerHTML = '<div class="top"><b class="num"></b><span class="sid"></span><span class="mac"></span><span class="badge"></span></div>' +
+                 '<div class="nm"></div>' +
                  '<div class="msg"></div>' +
                  '<div class="row"><span class="pk"></span><span class="bat"></span><button></button></div>';
   const c = {el: el, t: t};
   el.querySelector('button').onclick = function () {
     post('/api/' + (c.t.running ? 'stop' : 'start') + '/' + c.t.id);
   };
+  el.querySelector('.nm').onclick = function () { openName(c.t); };
   list.appendChild(el);
   cards[t.id] = c;
   return c;
@@ -250,6 +308,9 @@ function render(d) {
     c.el.querySelector('.sid').textContent = t.sid || '';
     c.el.querySelector('.mac').textContent = t.mac;
     c.el.querySelector('.badge').textContent = t.status;
+    const nm = c.el.querySelector('.nm');
+    nm.textContent = t.name || 'Tap to name';
+    nm.className = 'nm' + (t.name ? '' : ' empty');
     c.el.querySelector('.msg').textContent = t.message;
     c.el.querySelector('.pk').textContent = t.packets + ' packets';
     const bat = c.el.querySelector('.bat');

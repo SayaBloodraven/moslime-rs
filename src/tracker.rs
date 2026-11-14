@@ -64,6 +64,8 @@ pub struct TrackerView {
     pub battery: Option<u8>,
     /// When that level was last received (pucks may only refresh it on connect).
     pub battery_at: Option<Instant>,
+    /// The user's own name for this puck ("Left foot"); empty = none.
+    pub name: String,
 }
 
 impl Default for TrackerView {
@@ -76,6 +78,7 @@ impl Default for TrackerView {
             id: String::new(),
             battery: None,
             battery_at: None,
+            name: String::new(),
         }
     }
 }

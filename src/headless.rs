@@ -115,6 +115,24 @@ impl Bridge {
         }
     }
 
+    /// Names a puck (shown on its card). Empty clears the name.
+    pub async fn set_name(&self, i: usize, text: &str) -> Result<()> {
+        let slot = self.slots.get(i).context("no such tracker")?;
+        let name: String = text
+            .chars()
+            .filter(|c| !c.is_control())
+            .collect::<String>()
+            .trim()
+            .chars()
+            .take(24)
+            .collect();
+        config::save_name(&slot.mac, &name)?;
+        if let Ok(mut v) = slot.view.lock() {
+            v.name = name;
+        }
+        Ok(())
+    }
+
     pub async fn stop_all(&self) {
         for i in 0..self.slots.len() {
             let _ = self.stop(i).await;
@@ -171,7 +189,7 @@ impl Bridge {
                     .map(|r| !r.cancel.is_cancelled() && !r.handle.is_finished())
                     .unwrap_or(false)
             };
-            let (status, packets, message, sid, battery, battery_age) = {
+            let (status, packets, message, sid, battery, battery_age, name) = {
                 match s.view.lock() {
                     Ok(v) => (
                         format!("{:?}", v.status),
@@ -180,15 +198,17 @@ impl Bridge {
                         v.id.clone(),
                         v.battery.map_or(-1, i32::from),
                         v.battery_at.map_or(-1, |t| t.elapsed().as_secs() as i64),
+                        v.name.clone(),
                     ),
-                    Err(_) => ("Disconnected".to_string(), 0, String::new(), String::new(), -1, -1),
+                    Err(_) => ("Disconnected".to_string(), 0, String::new(), String::new(), -1, -1, String::new()),
                 }
             };
             items.push(format!(
-                "{{\"id\":{i},\"number\":{},\"mac\":\"{}\",\"sid\":\"{}\",\"status\":\"{}\",\"running\":{running},\"packets\":{packets},\"battery\":{battery},\"battery_age\":{battery_age},\"message\":\"{}\"}}",
+                "{{\"id\":{i},\"number\":{},\"mac\":\"{}\",\"sid\":\"{}\",\"name\":\"{}\",\"status\":\"{}\",\"running\":{running},\"packets\":{packets},\"battery\":{battery},\"battery_age\":{battery_age},\"message\":\"{}\"}}",
                 s.sensor_id as usize + 1,
                 json_escape(&s.mac),
                 json_escape(&sid),
+                json_escape(&name),
                 status,
                 json_escape(&message)
             ));
@@ -319,6 +339,7 @@ pub fn run(rt: &Runtime) -> Result<()> {
             .map(|(i, mac, mac_bytes)| {
                 let view = TrackerView {
                     id: settings.ids.get(&mac).cloned().unwrap_or_default(),
+                    name: settings.names.get(&mac.to_uppercase()).cloned().unwrap_or_default(),
                     ..TrackerView::default()
                 };
                 Slot {
