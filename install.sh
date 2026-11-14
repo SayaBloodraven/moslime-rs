@@ -75,7 +75,7 @@ if [ "$BUILD" -eq 1 ]; then
   PKGS="$PKGS build-essential pkg-config libdbus-1-dev git"
 fi
 if [ "$KIOSK" -eq 1 ]; then
-  PKGS="$PKGS cage chromium"
+  PKGS="$PKGS xserver-xorg xinit chromium"
 fi
 sudo apt-get update
 # shellcheck disable=SC2086
@@ -184,9 +184,11 @@ if [ "$KIOSK" -eq 1 ]; then
     cat >> "$PROFILE" <<'KIOSKRC'
 
 # moslime kiosk: on the Pi's own screen (tty1) show the control page full-screen
-if [ -z "${WAYLAND_DISPLAY:-}" ] && [ "$(tty)" = /dev/tty1 ]; then
+# (a plain X server with -nocursor: the Wayland "cage" kiosk kept drawing a
+# stuck mouse pointer in the middle of a touch-only screen)
+if [ -z "${DISPLAY:-}" ] && [ "$(tty)" = /dev/tty1 ]; then
   until wget -q -O /dev/null http://localhost:8080/api/status; do sleep 1; done
-  exec cage -s -- chromium --kiosk --noerrdialogs --disable-infobars --no-first-run --ozone-platform=wayland 'http://localhost:8080/?kiosk=1'
+  exec startx /usr/bin/chromium --kiosk --noerrdialogs --disable-infobars --no-first-run "http://localhost:8080/?kiosk=1" -- -nocursor
 fi
 KIOSKRC
   fi

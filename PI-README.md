@@ -21,10 +21,10 @@ If the Pi has its own touch screen (no desktop needed), add `--kiosk`:
 
     bash <(wget -qO- https://moslime.bloodraven.net) --service --kiosk
 
-It installs a tiny single-app display (`cage`) and a browser, turns on console
-auto-login and opens the control page full-screen after a reboot. This part is
-untested; screen rotation or touch alignment may need adjusting for your
-screen. The manual steps follow.
+It installs a minimal X server and a browser, turns on console auto-login and
+opens the control page full-screen after a reboot, with the mouse pointer
+hidden. Tested on a Pi 4B with a 5-inch DSI touch screen; screen rotation or
+touch alignment may need adjusting for other screens. The manual steps follow.
 
 ## 1. Prepare the Pi
     sudo apt update
@@ -105,17 +105,19 @@ at the top, type the new IP with the on-page keypad, and Save. It is written to
 `config_six.json` and any running pucks reconnect briefly to use it.
 
 ## Showing the page on the Pi's touch screen (kiosk, no desktop)
-Untested suggestion; adjust as needed. Install a tiny single-app display
-server and a browser:
+Install a minimal X server and a browser:
 
-    sudo apt install -y cage chromium
+    sudo apt install -y xserver-xorg xinit chromium
 
 Turn on console auto-login (`sudo raspi-config` -> System Options -> Boot / Auto
 Login -> Console Autologin), then add this to the end of `~/.bash_profile`:
 
-    if [ "$(tty)" = /dev/tty1 ]; then
-      exec cage -s -- chromium --kiosk --noerrdialogs --disable-infobars 'http://localhost:8080/?kiosk=1'
+    if [ -z "${DISPLAY:-}" ] && [ "$(tty)" = /dev/tty1 ]; then
+      exec startx /usr/bin/chromium --kiosk --noerrdialogs --disable-infobars --no-first-run "http://localhost:8080/?kiosk=1" -- -nocursor
     fi
+
+`-nocursor` is what hides the mouse pointer. (A Wayland kiosk with `cage` also
+works but kept showing a stuck pointer in the middle of a touch-only screen.)
 
 The bridge itself still runs from systemd (`moslime.service`). Don't also enable
 the `TTYPath=/dev/tty1` lines in the service, since the kiosk uses that screen.
