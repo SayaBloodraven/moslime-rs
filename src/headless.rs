@@ -235,7 +235,8 @@ impl Bridge {
             ));
         }
         format!(
-            "{{\"compat\":{},\"server\":\"{}\",\"trackers\":[{}]}}",
+            "{{\"ver\":{},\"compat\":{},\"server\":\"{}\",\"trackers\":[{}]}}",
+            web::page_version(),
             self.compat,
             json_escape(&self.addr().to_string()),
             items.join(",")

@@ -151,6 +151,18 @@ fn percent_decode(s: &str) -> String {
     String::from_utf8_lossy(&out).into_owned()
 }
 
+/// Changes whenever the page itself changes. The page compares it on every
+/// status poll and reloads itself, so a kiosk screen picks up an updated bridge
+/// without a reboot.
+pub fn page_version() -> u64 {
+    let mut h: u64 = 0xcbf29ce484222325;
+    for b in PAGE.bytes() {
+        h ^= u64::from(b);
+        h = h.wrapping_mul(0x100000001b3);
+    }
+    h
+}
+
 const PAGE: &str = r##"<!doctype html>
 <html lang="en"><head>
 <meta charset="utf-8">
@@ -297,7 +309,10 @@ function ensure(t) {
   cards[t.id] = c;
   return c;
 }
+let pageVer = null;
 function render(d) {
+  if (pageVer === null) pageVer = d.ver;
+  else if (d.ver !== pageVer) { location.reload(); return; }
   curServer = d.server;
   document.getElementById('srv').textContent = 'SlimeVR PC: ' + d.server + '  (tap to change)';
   for (const t of d.trackers) {
