@@ -409,6 +409,18 @@ async fn session(ctx: &TrackerCtx, sock: &UdpSocket, pcounter: &mut u64) -> Resu
 }
 
 /// Remembers a battery level and when it arrived; logs only when it changes.
+/// Debug aid for finding where the puck reports its battery while streaming:
+/// while a file named `debug_frames` exists in the working folder, one raw
+/// data frame per puck is logged each minute (plus the characteristic list at
+/// connect). Create it with `touch debug_frames`, delete it to stop.
+fn debug_frames() -> bool {
+    std::path::Path::new("debug_frames").exists()
+}
+
+fn hex(data: &[u8]) -> String {
+    data.iter().map(|b| format!("{b:02x}")).collect::<Vec<_>>().join(" ")
+}
+
 fn store_battery(ctx: &TrackerCtx, pct: u8, how: &str) {
     let pct = pct.min(100);
     let changed = match ctx.view.lock() {
@@ -509,6 +521,20 @@ async fn stream(
 
     let mut last_battery: Option<Instant> = None;
 
+    let mut debug_on = debug_frames();
+    let mut last_frame_log: Option<Instant> = None;
+    if debug_on {
+        for c in p.characteristics() {
+            let mut line = format!("raw: characteristic {} {:?}", c.uuid, c.properties);
+            if c.properties.contains(CharPropFlags::READ) && c.uuid != DATA_CHAR_UUID {
+                if let Ok(Ok(v)) = tokio::time::timeout(Duration::from_secs(3), p.read(&c)).await {
+                    line.push_str(&format!(" = {}", hex(&v)));
+                }
+            }
+            eprintln!("[tracker #{}] {}", ctx.sensor_id as usize + 1, line);
+        }
+    }
+
     let mut last_rx = Instant::now();
     let mut watchdog = tokio::time::interval(Duration::from_secs(1));
 
@@ -535,9 +561,16 @@ async fn stream(
                     continue;
                 }
                 if n.uuid != DATA_CHAR_UUID {
+                    if debug_on {
+                        eprintln!("[tracker #{}] raw: other {} = {}", ctx.sensor_id as usize + 1, n.uuid, hex(&n.value));
+                    }
                     continue;
                 }
                 last_rx = Instant::now();
+                if debug_on && last_frame_log.map_or(true, |t| t.elapsed() >= Duration::from_secs(60)) {
+                    last_frame_log = Some(Instant::now());
+                    eprintln!("[tracker #{}] raw: frame {} bytes = {}", ctx.sensor_id as usize + 1, n.value.len(), hex(&n.value));
+                }
 
                 if let Some((q, a)) = protocol::decode(&n.value) {
                     *pcounter += 1;
@@ -568,6 +601,7 @@ async fn stream(
             }
 
             _ = watchdog.tick() => {
+                debug_on = debug_frames();
                 if last_rx.elapsed() > STALE_AFTER {
                     return Err(anyhow!("no data for {}s", STALE_AFTER.as_secs()));
                 }
