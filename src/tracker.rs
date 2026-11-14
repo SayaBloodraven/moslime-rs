@@ -62,6 +62,8 @@ pub struct TrackerView {
     pub id: String,
     /// Battery level in percent, when the puck has reported it.
     pub battery: Option<u8>,
+    /// When that level was last received (pucks may only refresh it on connect).
+    pub battery_at: Option<Instant>,
 }
 
 impl Default for TrackerView {
@@ -73,6 +75,7 @@ impl Default for TrackerView {
             message: String::new(),
             id: String::new(),
             battery: None,
+            battery_at: None,
         }
     }
 }
@@ -402,6 +405,23 @@ async fn session(ctx: &TrackerCtx, sock: &UdpSocket, pcounter: &mut u64) -> Resu
     result
 }
 
+/// Remembers a battery level and when it arrived; logs only when it changes.
+fn store_battery(ctx: &TrackerCtx, pct: u8, how: &str) {
+    let pct = pct.min(100);
+    let changed = match ctx.view.lock() {
+        Ok(mut v) => {
+            let changed = v.battery != Some(pct);
+            v.battery = Some(pct);
+            v.battery_at = Some(Instant::now());
+            changed
+        }
+        Err(_) => false,
+    };
+    if changed {
+        eprintln!("[tracker #{}] battery {pct}% ({how})", ctx.sensor_id as usize + 1);
+    }
+}
+
 async fn stream(
     ctx: &TrackerCtx,
     sock: &UdpSocket,
@@ -449,9 +469,23 @@ async fn stream(
     *pcounter += 1;
     send(sock, ctx.slime_addr, &protocol::build_sensor_info(*pcounter, ctx.sensor_id)).await;
 
+    // Battery: read once now, then rarely, and also listen for change
+    // notifications (the pucks may send them; Windows' Bluetooth page shows
+    // the level live). Reads are skipped when the puck isn't delivering
+    // data, so they never add traffic to a link that is struggling.
+    let battery_char = p
+        .characteristics()
+        .into_iter()
+        .find(|c| c.uuid == BATTERY_CHAR_UUID && c.properties.contains(CharPropFlags::READ));
+
     p.subscribe(&data_char)
         .await
         .context("subscribe failed")?;
+    if let Some(bc) = &battery_char {
+        if bc.properties.contains(CharPropFlags::NOTIFY) {
+            let _ = p.subscribe(bc).await;
+        }
+    }
     let write_type = if cmd_char.properties.contains(CharPropFlags::WRITE) {
         WriteType::WithResponse
     } else {
@@ -470,12 +504,6 @@ async fn stream(
     ctx.set_status(Status::Connected);
     ctx.note("streaming");
 
-    // Battery: read once now, then rarely. Skipped when the puck isn't
-    // delivering data, so it never adds traffic to a link that is struggling.
-    let battery_char = p
-        .characteristics()
-        .into_iter()
-        .find(|c| c.uuid == BATTERY_CHAR_UUID && c.properties.contains(CharPropFlags::READ));
     let mut last_battery: Option<Instant> = None;
 
     let mut last_rx = Instant::now();
@@ -497,6 +525,12 @@ async fn stream(
                 let Some(n) = n else {
                     return Err(anyhow!("notification stream closed (tracker disconnected)"));
                 };
+                if n.uuid == BATTERY_CHAR_UUID {
+                    if let Some(&pct) = n.value.first() {
+                        store_battery(ctx, pct, "notification");
+                    }
+                    continue;
+                }
                 if n.uuid != DATA_CHAR_UUID {
                     continue;
                 }
@@ -541,10 +575,7 @@ async fn stream(
                         let read = tokio::time::timeout(Duration::from_secs(3), p.read(bc)).await;
                         if let Ok(Ok(v)) = read {
                             if let Some(&pct) = v.first() {
-                                if let Ok(mut view) = ctx.view.lock() {
-                                    view.battery = Some(pct.min(100));
-                                }
-                                eprintln!("[tracker #{}] battery {}%", ctx.sensor_id as usize + 1, pct);
+                                store_battery(ctx, pct, "read");
                             }
                         }
                     }

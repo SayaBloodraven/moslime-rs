@@ -254,7 +254,12 @@ function render(d) {
     c.el.querySelector('.pk').textContent = t.packets + ' packets';
     const bat = c.el.querySelector('.bat');
     if (t.battery >= 0) {
-      bat.textContent = 'Battery ' + t.battery + '%';
+      let age = '';
+      if (t.battery_age > 1800) {
+        const h = Math.floor(t.battery_age / 3600), m = Math.floor((t.battery_age % 3600) / 60);
+        age = ' (' + (h > 0 ? h + 'h ' : '') + m + 'm ago)';
+      }
+      bat.textContent = 'Battery ' + t.battery + '%' + age;
       bat.className = 'bat' + (t.battery < 10 ? ' crit' : t.battery < 25 ? ' low' : '');
     } else {
       bat.textContent = '';

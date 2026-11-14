@@ -171,7 +171,7 @@ impl Bridge {
                     .map(|r| !r.cancel.is_cancelled() && !r.handle.is_finished())
                     .unwrap_or(false)
             };
-            let (status, packets, message, sid, battery) = {
+            let (status, packets, message, sid, battery, battery_age) = {
                 match s.view.lock() {
                     Ok(v) => (
                         format!("{:?}", v.status),
@@ -179,12 +179,13 @@ impl Bridge {
                         v.message.clone(),
                         v.id.clone(),
                         v.battery.map_or(-1, i32::from),
+                        v.battery_at.map_or(-1, |t| t.elapsed().as_secs() as i64),
                     ),
-                    Err(_) => ("Disconnected".to_string(), 0, String::new(), String::new(), -1),
+                    Err(_) => ("Disconnected".to_string(), 0, String::new(), String::new(), -1, -1),
                 }
             };
             items.push(format!(
-                "{{\"id\":{i},\"number\":{},\"mac\":\"{}\",\"sid\":\"{}\",\"status\":\"{}\",\"running\":{running},\"packets\":{packets},\"battery\":{battery},\"message\":\"{}\"}}",
+                "{{\"id\":{i},\"number\":{},\"mac\":\"{}\",\"sid\":\"{}\",\"status\":\"{}\",\"running\":{running},\"packets\":{packets},\"battery\":{battery},\"battery_age\":{battery_age},\"message\":\"{}\"}}",
                 s.sensor_id as usize + 1,
                 json_escape(&s.mac),
                 json_escape(&sid),
