@@ -208,12 +208,12 @@ main{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:
 #ndlg h2{margin-bottom:6px}
 #nin{margin-bottom:6px;padding:8px 12px}
 .presets{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:8px}
-.presets button{padding:6px 2px;font-size:13px;min-height:36px;border-radius:8px}
+.presets button{padding:4px 2px;font-size:13px;min-height:32px;border-radius:8px}
 .krow{display:flex;gap:4px;margin-bottom:4px}
-.krow button{flex:1;min-width:0;padding:0;min-height:38px;font-size:16px;border-radius:8px}
+.krow button{flex:1;min-width:0;padding:0;min-height:34px;font-size:16px;border-radius:8px}
 .krow button.wide{flex:1.6}
 .krow button.space{flex:6}
-#ndlg .bar button{min-height:42px;padding:8px 18px}
+#ndlg .bar button{min-height:42px;padding:6px 18px}
 .row{display:flex;align-items:center;justify-content:space-between}
 .pk{color:#9aa0a8;font-size:13px}
 .bat{font-size:13px;color:#9aa0a8;margin:0 10px;flex:1;text-align:right}
@@ -237,7 +237,7 @@ main{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:
   <input id="nin" maxlength="24" placeholder="Type a name, or pick one" autocomplete="off">
   <div class="presets" id="presets"></div>
   <div id="kb"></div>
-  <div id="nerr" style="color:#e07070;font-size:13px;min-height:1.4em;margin-bottom:8px"></div>
+  <div id="nerr" style="color:#e07070;font-size:13px;margin-bottom:6px"></div>
   <div class="bar"><button id="nclr">Clear</button><button id="nc">Cancel</button><button class="start" id="ns">Save</button></div>
 </div></div>
 <script>
@@ -264,7 +264,7 @@ const ndlg = document.getElementById('ndlg');
 const nin = document.getElementById('nin');
 const nerr = document.getElementById('nerr');
 let nameIdx = -1;
-for (const n of ['Chest','Hip','Left thigh','Right thigh','Left knee','Right knee','Left foot','Right foot','Left elbow','Right elbow','Upper chest','Waist']) {
+for (const n of ['Chest','Upper chest','Hip','Waist','Left thigh','Right thigh','Left knee','Right knee','Left ankle','Right ankle','Left foot','Right foot','Left elbow','Right elbow','Left wrist','Right wrist']) {
   const b = document.createElement('button');
   b.textContent = n;
   b.onclick = function () { nin.value = n; };
