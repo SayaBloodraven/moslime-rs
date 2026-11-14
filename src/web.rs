@@ -204,7 +204,9 @@ main{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:
 #ndlg{position:fixed;inset:0;background:#000b;display:flex;align-items:center;justify-content:center;z-index:6}
 #ndlg[hidden]{display:none}
 #nin{width:100%;font:18px system-ui,sans-serif;background:#101215;color:#e8e8e8;border:1px solid #3a3f47;border-radius:8px;padding:12px;margin-bottom:10px}
-#ndlg .box{width:min(520px,98vw);max-height:98vh;overflow-y:auto;padding:12px}
+#ndlg .box{width:min(520px,98vw);max-height:98vh;display:flex;flex-direction:column;padding:12px}
+#ndlg .nbody{flex:1;min-height:0;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior:contain}
+#ndlg .bar{flex-shrink:0;margin-top:6px}
 #ndlg h2{margin-bottom:6px}
 #nin{margin-bottom:6px;padding:8px 12px}
 .presets{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:8px}
@@ -235,9 +237,11 @@ main{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:
 <div id="ndlg" hidden><div class="box">
   <h2 id="ntitle">Name this puck</h2>
   <input id="nin" maxlength="24" placeholder="Type a name, or pick one" autocomplete="off">
+  <div class="nbody">
   <div class="presets" id="presets"></div>
   <div id="kb"></div>
   <div id="nerr" style="color:#e07070;font-size:13px;margin-bottom:6px"></div>
+  </div>
   <div class="bar"><button id="nclr">Clear</button><button id="nc">Cancel</button><button class="start" id="ns">Save</button></div>
 </div></div>
 <script>
