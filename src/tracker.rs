@@ -605,7 +605,20 @@ async fn stream(
     }
     drop(permit);
     ctx.set_status(Status::Connected);
-    ctx.note(if start_cmd[4] == 0x11 { "streaming (app mode)" } else { "streaming" });
+    // Linux: move the link to the 2M radio mode so six pucks fit on one
+    // adapter (see ble::prefer_2m). Skipped while a `no_2m` file exists.
+    let fast = cfg!(target_os = "linux")
+        && !std::path::Path::new("no_2m").exists()
+        && matches!(
+            tokio::time::timeout(Duration::from_secs(4), ble::prefer_2m(&ctx.adapter, &ctx.mac)).await,
+            Ok(true)
+        );
+    ctx.note(match (start_cmd[4] == 0x11, fast) {
+        (true, true) => "streaming (app mode, 2M requested)",
+        (true, false) => "streaming (app mode)",
+        (false, true) => "streaming (2M requested)",
+        (false, false) => "streaming",
+    });
 
     let mut last_battery: Option<Instant> = None;
 

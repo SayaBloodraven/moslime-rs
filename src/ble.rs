@@ -64,6 +64,59 @@ pub async fn restart_bluetooth_service() -> Result<()> {
     Err(anyhow!("not supported on this system"))
 }
 
+/// Ask the adapter to move one puck's link to the 2M radio mode (half the
+/// airtime per packet). Measured on a Pi with six pucks on one dongle: on the
+/// default 1M mode the adapter skipped two of every three visits to some
+/// pucks, leaving them at 22 or 33 updates/s instead of 50; after this
+/// request all six held 50. BlueZ never asks by itself, so this sends the
+/// raw "LE Set PHY" command with `hcitool` (needs passwordless sudo). The
+/// request lasts for this connection only. Returns false if it could not be
+/// sent; the link then simply stays on 1M.
+#[cfg(target_os = "linux")]
+pub async fn prefer_2m(adapter: &Adapter, mac: &str) -> bool {
+    let info = adapter.adapter_info().await.unwrap_or_default();
+    let Some(hci) = info.split_whitespace().next().map(str::to_string) else {
+        return false;
+    };
+    let Ok(out) = tokio::process::Command::new("hcitool")
+        .args(["-i", &hci, "con"])
+        .output()
+        .await
+    else {
+        return false;
+    };
+    let text = String::from_utf8_lossy(&out.stdout).to_string();
+    let mac = mac.to_ascii_uppercase();
+    let handle = text.lines().find(|l| l.to_ascii_uppercase().contains(&mac)).and_then(|l| {
+        let mut words = l.split_whitespace();
+        while let Some(w) = words.next() {
+            if w == "handle" {
+                return words.next().and_then(|h| h.parse::<u16>().ok());
+            }
+        }
+        None
+    });
+    let Some(handle) = handle else {
+        return false;
+    };
+    let lo = format!("{:02x}", handle & 0xff);
+    let hi = format!("{:02x}", handle >> 8);
+    // LE Set PHY: handle, no "any PHY" flags, TX 2M, RX 2M, no coding options.
+    tokio::process::Command::new("sudo")
+        .args(["-n", "hcitool", "-i", &hci, "cmd", "0x08", "0x0032", &lo, &hi, "00", "02", "02", "00", "00"])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status()
+        .await
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+#[cfg(not(target_os = "linux"))]
+pub async fn prefer_2m(_adapter: &Adapter, _mac: &str) -> bool {
+    false
+}
+
 /// Linux numbers adapters (hci0, hci1) in whatever order they came up, and
 /// the order can change between boots. An address in the config is stable, so
 /// turn it into the adapter's current name ("hci0") before matching.
