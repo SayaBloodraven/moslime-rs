@@ -275,6 +275,16 @@ impl eframe::App for App {
                                 ui.colored_label(color, format!("{b}%"))
                                     .on_hover_text("Battery");
                             }
+                            if v.status == Status::Connected {
+                                // A healthy puck sends 50 updates a second.
+                                let color = if v.rate >= 45 {
+                                    egui::Color32::GRAY
+                                } else {
+                                    egui::Color32::from_rgb(224, 160, 48)
+                                };
+                                ui.colored_label(color, format!("{}/s", v.rate))
+                                    .on_hover_text("Updates per second from this puck (50 is full speed)");
+                            }
                         });
 
                         ui.monospace(format!(

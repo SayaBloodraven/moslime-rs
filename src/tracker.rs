@@ -64,6 +64,9 @@ pub struct TrackerView {
     pub status: Status,
     pub quat: Quat,
     pub packets: u64,
+    /// Data frames per second from the puck, averaged over the last few
+    /// seconds (a healthy puck sends 50); 0 while not streaming.
+    pub rate: u32,
     pub message: String,
     /// Printed ID of the puck ("QM-SS1 170E9" -> "170E9"); empty until known.
     pub id: String,
@@ -81,6 +84,7 @@ impl Default for TrackerView {
             status: Status::Disconnected,
             quat: [1.0, 0.0, 0.0, 0.0],
             packets: 0,
+            rate: 0,
             message: String::new(),
             id: String::new(),
             battery: None,
@@ -227,6 +231,9 @@ impl TrackerCtx {
     fn set_status(&self, s: Status) {
         if let Ok(mut v) = self.view.lock() {
             v.status = s;
+            if s != Status::Connected {
+                v.rate = 0;
+            }
         }
     }
 
@@ -637,6 +644,8 @@ async fn stream(
     }
 
     let mut last_rx = Instant::now();
+    let mut rate_frames: u32 = 0;
+    let mut rate_since = Instant::now();
     let mut watchdog = tokio::time::interval(Duration::from_secs(1));
 
     // If SlimeVR wasn't running (or its first reply got lost) when we sent the
@@ -689,6 +698,7 @@ async fn stream(
                     *pcounter += 1;
                     send(sock, ctx.slime_addr, &protocol::build_accel_packet(a, *pcounter, ctx.sensor_id)).await;
 
+                    rate_frames += 1;
                     if let Ok(mut v) = ctx.view.lock() {
                         v.quat = q;
                         v.packets += 2;
@@ -713,6 +723,15 @@ async fn stream(
 
             _ = watchdog.tick() => {
                 debug_on = debug_frames();
+                let span = rate_since.elapsed().as_secs_f64();
+                if span >= 4.0 {
+                    let rate = (f64::from(rate_frames) / span).round() as u32;
+                    rate_frames = 0;
+                    rate_since = Instant::now();
+                    if let Ok(mut v) = ctx.view.lock() {
+                        v.rate = rate;
+                    }
+                }
                 if last_rx.elapsed() > STALE_AFTER {
                     return Err(anyhow!("no data for {}s", STALE_AFTER.as_secs()));
                 }

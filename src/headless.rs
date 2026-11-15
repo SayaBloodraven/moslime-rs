@@ -224,8 +224,9 @@ impl Bridge {
                     Err(_) => ("Disconnected".to_string(), 0, String::new(), String::new(), -1, -1, String::new()),
                 }
             };
+            let rate = s.view.lock().map(|v| v.rate).unwrap_or(0);
             items.push(format!(
-                "{{\"id\":{i},\"number\":{},\"mac\":\"{}\",\"sid\":\"{}\",\"name\":\"{}\",\"status\":\"{}\",\"running\":{running},\"packets\":{packets},\"battery\":{battery},\"battery_age\":{battery_age},\"message\":\"{}\"}}",
+                "{{\"id\":{i},\"number\":{},\"mac\":\"{}\",\"sid\":\"{}\",\"name\":\"{}\",\"status\":\"{}\",\"running\":{running},\"packets\":{packets},\"rate\":{rate},\"battery\":{battery},\"battery_age\":{battery_age},\"message\":\"{}\"}}",
                 s.sensor_id as usize + 1,
                 json_escape(&s.mac),
                 json_escape(&sid),

@@ -378,7 +378,7 @@ function render(d) {
     nm.textContent = t.name || 'Tap to name';
     nm.className = 'nm' + (t.name ? '' : ' empty');
     c.el.querySelector('.msg').textContent = t.message;
-    c.el.querySelector('.pk').textContent = t.packets + ' packets';
+    c.el.querySelector('.pk').textContent = (t.status === 'Connected' ? t.rate + ' updates/s' : t.packets + ' packets');
     const bat = c.el.querySelector('.bat');
     if (t.battery >= 0) {
       let age = '';
