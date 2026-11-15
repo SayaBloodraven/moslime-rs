@@ -418,11 +418,13 @@ pub fn run(rt: &Runtime) -> Result<()> {
         // Self-repair when the Bluetooth side is stuck: if two or more pucks are
         // started but none has streamed for 90 s, first switch the adapter's radio
         // off and on, then (if still stuck 90 s later) restart the Bluetooth
-        // service. Pucks that are simply switched off look the same, so after the
-        // two steps it waits ~10 minutes before trying again. Never acts while
-        // any puck is streaming.
+        // service. Pucks that are simply switched off (or flat) look the same,
+        // so after the two steps it waits before trying again: 10 minutes, then
+        // 30, then an hour each time, until a puck streams again. Never acts
+        // while any puck is streaming.
         let mut stuck_ticks: u32 = 0;
         let mut repair_stage: u8 = 0;
+        let mut repair_rounds: u32 = 0;
         // Second trigger: pucks that keep connecting, streaming for a few
         // seconds and dropping again (they can knock each other off in a
         // loop). Eight of those in three minutes: reset the adapter, at most
@@ -453,6 +455,9 @@ pub fn run(rt: &Runtime) -> Result<()> {
                     } else {
                         stuck_ticks = 0;
                         repair_stage = 0;
+                        if streaming > 0 {
+                            repair_rounds = 0;
+                        }
                     }
                     if stuck_ticks >= 3 && repair_stage == 0 {
                         eprintln!("[repair] no puck has connected for 90s - switching the Bluetooth adapter off and on");
@@ -468,10 +473,14 @@ pub fn run(rt: &Runtime) -> Result<()> {
                         }
                         repair_stage = 2;
                         stuck_ticks = 0;
-                    } else if stuck_ticks >= 20 && repair_stage == 2 {
-                        // Still stuck 10 minutes later (or the pucks are just off): start over.
+                    } else if repair_stage == 2
+                        && stuck_ticks >= 20 * [1, 3, 6][repair_rounds.min(2) as usize]
+                    {
+                        // Still stuck (or the pucks are just off): start over,
+                        // waiting longer each round.
                         repair_stage = 0;
                         stuck_ticks = 0;
+                        repair_rounds += 1;
                     }
                     if bridge.gate.take_flaps(8)
                         && last_flap_reset.map_or(true, |t| t.elapsed() >= Duration::from_secs(600))
