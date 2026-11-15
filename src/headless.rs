@@ -414,6 +414,11 @@ pub fn run(rt: &Runtime) -> Result<()> {
         // any puck is streaming.
         let mut stuck_ticks: u32 = 0;
         let mut repair_stage: u8 = 0;
+        // Second trigger: pucks that keep connecting, streaming for a few
+        // seconds and dropping again (they can knock each other off in a
+        // loop). Eight of those in three minutes: reset the adapter, at most
+        // once every ten minutes.
+        let mut last_flap_reset: Option<std::time::Instant> = None;
 
         loop {
             tokio::select! {
@@ -446,6 +451,15 @@ pub fn run(rt: &Runtime) -> Result<()> {
                         // Still stuck 10 minutes later (or the pucks are just off): start over.
                         repair_stage = 0;
                         stuck_ticks = 0;
+                    }
+                    if bridge.gate.take_flaps(8)
+                        && last_flap_reset.map_or(true, |t| t.elapsed() >= Duration::from_secs(600))
+                    {
+                        last_flap_reset = Some(std::time::Instant::now());
+                        eprintln!("[repair] pucks keep dropping right after connecting - switching the Bluetooth adapter off and on");
+                        if let Err(e) = ble::power_cycle(&bridge.adapter).await {
+                            eprintln!("[repair] adapter reset failed: {e:#}");
+                        }
                     }
                     // Remember newly seen puck IDs so they show immediately next time.
                     let ids = bridge.known_ids();

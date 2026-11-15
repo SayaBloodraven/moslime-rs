@@ -96,6 +96,8 @@ pub struct ConnectGate {
     scan_refreshed: Mutex<Instant>,
     /// When trackers recently failed to connect/stream (for the retry brake).
     failures: Mutex<Vec<Instant>>,
+    /// When a puck streamed briefly and then went silent (see `note_flap`).
+    flaps: Mutex<Vec<Instant>>,
 }
 
 pub struct ConnectPermit<'a> {
@@ -111,6 +113,35 @@ impl ConnectGate {
             compat: AtomicBool::new(false),
             scan_refreshed: Mutex::new(Instant::now()),
             failures: Mutex::new(Vec::new()),
+            flaps: Mutex::new(Vec::new()),
+        }
+    }
+
+    /// Records that a puck connected, streamed for under a minute and then
+    /// went silent. Seen on the Pi: two pucks got into a loop where each
+    /// one's reconnect silenced the other, every ~12 s for half an hour.
+    fn note_flap(&self) {
+        if let Ok(mut f) = self.flaps.lock() {
+            f.push(Instant::now());
+        }
+    }
+
+    /// True (and the count starts over) when at least `min` such short
+    /// sessions happened in the last three minutes.
+    #[allow(dead_code)]
+    pub fn take_flaps(&self, min: usize) -> bool {
+        match self.flaps.lock() {
+            Ok(mut f) => {
+                let now = Instant::now();
+                f.retain(|t| now.duration_since(*t) < Duration::from_secs(180));
+                if f.len() >= min {
+                    f.clear();
+                    true
+                } else {
+                    false
+                }
+            }
+            Err(_) => false,
         }
     }
 
@@ -244,11 +275,17 @@ pub async fn run_tracker(ctx: TrackerCtx) {
             || reason.contains("In Progress")
             || reason.contains("not seen");
         let cap = if soft { SOFT_BACKOFF_MAX } else { BACKOFF_MAX };
-        backoff = if was_streaming && started.elapsed() > Duration::from_secs(10) {
+        // Only a session that held for a minute resets the backoff. (It used
+        // to be 10 s, which let two pucks knock each other off in a loop with
+        // a 1 s retry each time.)
+        backoff = if was_streaming && started.elapsed() > Duration::from_secs(60) {
             BACKOFF_MIN
         } else {
             (backoff * 2).min(cap)
         };
+        if was_streaming && started.elapsed() <= Duration::from_secs(60) {
+            ctx.gate.note_flap();
+        }
         // Retry brake (Linux): with several pucks down, retrying them all at
         // once keeps the radio too busy for the connected ones, so back off
         // further and stagger the pucks so they don't retry in lockstep.
