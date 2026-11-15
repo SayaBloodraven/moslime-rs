@@ -256,6 +256,14 @@ impl Bridge {
         out
     }
 
+    /// Packets sent so far per puck (two per data frame from the puck).
+    fn packet_counts(&self) -> Vec<u64> {
+        self.slots
+            .iter()
+            .map(|s| s.view.lock().map(|v| v.packets).unwrap_or(0))
+            .collect()
+    }
+
     fn summary(&self) -> String {
         let mut up = Vec::new();
         let mut down = Vec::new();
@@ -419,12 +427,24 @@ pub fn run(rt: &Runtime) -> Result<()> {
         // loop). Eight of those in three minutes: reset the adapter, at most
         // once every ten minutes.
         let mut last_flap_reset: Option<std::time::Instant> = None;
+        let mut last_counts: Vec<u64> = bridge.packet_counts();
+        let mut last_counts_at = std::time::Instant::now();
 
         loop {
             tokio::select! {
                 _ = &mut shutdown => break,
                 _ = tick.tick() => {
-                    eprintln!("{}", bridge.summary());
+                    // Data frames per second from each puck since the last line.
+                    let counts = bridge.packet_counts();
+                    let secs = last_counts_at.elapsed().as_secs_f64().max(1.0);
+                    let rates: Vec<u64> = counts
+                        .iter()
+                        .zip(last_counts.iter().chain(std::iter::repeat(&0)))
+                        .map(|(now, before)| (now.saturating_sub(*before) as f64 / 2.0 / secs).round() as u64)
+                        .collect();
+                    last_counts = counts;
+                    last_counts_at = std::time::Instant::now();
+                    eprintln!("{} | updates/s: {:?}", bridge.summary(), rates);
 
                     let (running, streaming) = bridge.health().await;
                     if running >= 2 && streaming == 0 {

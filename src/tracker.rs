@@ -586,7 +586,15 @@ async fn stream(
             WriteType::WithoutResponse
         }
     };
-    p.write(&cmd_char, &START_STREAM_CMD, write_type())
+    // Experiment: Sony's app starts the stream with argument 0x11 instead of
+    // 0x01 and gets a steady 50 updates/s per puck (0x01 gives about 100,
+    // unevenly). While a file named `app_mode` exists in the working folder,
+    // use the app's argument.
+    let mut start_cmd = START_STREAM_CMD;
+    if std::path::Path::new("app_mode").exists() {
+        start_cmd[4] = 0x11;
+    }
+    p.write(&cmd_char, &start_cmd, write_type())
         .await
         .context("stream start command failed")?;
 
@@ -597,7 +605,7 @@ async fn stream(
     }
     drop(permit);
     ctx.set_status(Status::Connected);
-    ctx.note("streaming");
+    ctx.note(if start_cmd[4] == 0x11 { "streaming (app mode)" } else { "streaming" });
 
     let mut last_battery: Option<Instant> = None;
 
