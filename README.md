@@ -66,4 +66,9 @@ Prebuilt files come from the GitHub Actions build.
 - The web control page has no password; anyone on your network can use it.
   Set `web_port` to 0 to turn it off.
 
-Bug reports with the log output are very welcome.
+## Help test it
+This has been tested on one setup: a Raspberry Pi 4B with a TP-Link UB500 Plus
+adapter and six pucks. Reports from other machines are the most useful help
+right now, whether it works or not: other Pi models, other Linux systems,
+other Bluetooth adapters, Windows PCs. Please open an issue (there is a short
+form) and include your computer, adapter and the log output.
