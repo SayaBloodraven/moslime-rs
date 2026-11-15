@@ -27,8 +27,15 @@ const DATA_CHAR_UUID: Uuid = Uuid::from_u128(0x25047e64_657c_4856_afcf_e315048a9
 const CMD_CHAR_UUID: Uuid = Uuid::from_u128(0x0000ff01_0000_1000_8000_00805f9b34fb);
 /// Standard Bluetooth Battery Level (0-100 %).
 const BATTERY_CHAR_UUID: Uuid = Uuid::from_u128(0x00002a19_0000_1000_8000_00805f9b34fb);
-/// How often the battery level is re-read (one tiny read; kept rare on purpose).
-const BATTERY_EVERY: Duration = Duration::from_secs(300);
+/// Replies to commands written to the command characteristic arrive here.
+const REPLY_CHAR_UUID: Uuid = Uuid::from_u128(0x0000ff03_0000_1000_8000_00805f9b34fb);
+/// How often the battery level is asked for (Sony's app asks every 60 s).
+const BATTERY_EVERY: Duration = Duration::from_secs(60);
+/// "What is your battery level?", as sent by Sony's mocopi app (captured from
+/// an Android Bluetooth log). The puck answers on the reply characteristic
+/// with `7e 07 09 02 02 09 00 00 <percent> <2 check bytes>`. The standard
+/// Battery Level value is only refreshed when the puck connects.
+const BATTERY_POLL_CMD: [u8; 6] = [0x7e, 0x02, 0x09, 0x02, 0x9a, 0xda];
 const START_STREAM_CMD: [u8; 7] = [0x7e, 0x03, 0x18, 0xd6, 0x01, 0x00, 0x00];
 
 const FIND_TIMEOUT: Duration = Duration::from_secs(15);
@@ -538,6 +545,17 @@ async fn stream(
             let _ = p.subscribe(bc).await;
         }
     }
+    let reply_char = p
+        .characteristics()
+        .into_iter()
+        .find(|c| c.uuid == REPLY_CHAR_UUID && c.properties.contains(CharPropFlags::NOTIFY));
+    let reply_ok = match &reply_char {
+        Some(rc) => matches!(
+            tokio::time::timeout(Duration::from_secs(3), p.subscribe(rc)).await,
+            Ok(Ok(()))
+        ),
+        None => false,
+    };
     // Debug: also listen on every other channel the puck can notify on
     // (before the start command, so a reply to it is caught too). Whatever
     // arrives is logged as "raw: other". Nothing extra is sent to the puck.
@@ -545,7 +563,11 @@ async fn stream(
         for c in p.characteristics() {
             let can = c.properties.contains(CharPropFlags::NOTIFY)
                 || c.properties.contains(CharPropFlags::INDICATE);
-            if can && c.uuid != DATA_CHAR_UUID && c.uuid != BATTERY_CHAR_UUID {
+            if can
+                && c.uuid != DATA_CHAR_UUID
+                && c.uuid != BATTERY_CHAR_UUID
+                && c.uuid != REPLY_CHAR_UUID
+            {
                 let r = tokio::time::timeout(Duration::from_secs(3), p.subscribe(&c)).await;
                 let how = match r {
                     Ok(Ok(())) => "ok".to_string(),
@@ -556,12 +578,15 @@ async fn stream(
             }
         }
     }
-    let write_type = if cmd_char.properties.contains(CharPropFlags::WRITE) {
-        WriteType::WithResponse
-    } else {
-        WriteType::WithoutResponse
+    let with_response = cmd_char.properties.contains(CharPropFlags::WRITE);
+    let write_type = || {
+        if with_response {
+            WriteType::WithResponse
+        } else {
+            WriteType::WithoutResponse
+        }
     };
-    p.write(&cmd_char, &START_STREAM_CMD, write_type)
+    p.write(&cmd_char, &START_STREAM_CMD, write_type())
         .await
         .context("stream start command failed")?;
 
@@ -615,6 +640,16 @@ async fn stream(
                     }
                     continue;
                 }
+                if n.uuid == REPLY_CHAR_UUID {
+                    let v = &n.value;
+                    if v.len() >= 9 && v[0] == 0x7e && v[2] == 0x09 && v[3] == 0x02 && v[8] <= 100 {
+                        store_battery(ctx, v[8], "asked");
+                    }
+                    if debug_on {
+                        eprintln!("[tracker #{}] raw: reply = {}", ctx.sensor_id as usize + 1, hex(v));
+                    }
+                    continue;
+                }
                 if n.uuid != DATA_CHAR_UUID {
                     if debug_on {
                         eprintln!("[tracker #{}] raw: other {} = {}", ctx.sensor_id as usize + 1, n.uuid, hex(&n.value));
@@ -660,10 +695,20 @@ async fn stream(
                 if last_rx.elapsed() > STALE_AFTER {
                     return Err(anyhow!("no data for {}s", STALE_AFTER.as_secs()));
                 }
-                if let Some(bc) = &battery_char {
-                    let due = last_battery.map_or(true, |t| t.elapsed() >= BATTERY_EVERY);
-                    if due && last_rx.elapsed() < Duration::from_secs(2) {
-                        last_battery = Some(Instant::now());
+                // Battery: ask the puck the way Sony's app does (the answer
+                // comes back as a notification). Without the reply channel,
+                // fall back to one read of the standard value.
+                let due = last_battery.map_or(true, |t| t.elapsed() >= BATTERY_EVERY);
+                if due && last_rx.elapsed() < Duration::from_secs(2) {
+                    let first = last_battery.is_none();
+                    last_battery = Some(Instant::now());
+                    if reply_ok {
+                        let _ = tokio::time::timeout(
+                            Duration::from_secs(3),
+                            p.write(&cmd_char, &BATTERY_POLL_CMD, write_type()),
+                        )
+                        .await;
+                    } else if let (true, Some(bc)) = (first, &battery_char) {
                         let read = tokio::time::timeout(Duration::from_secs(3), p.read(bc)).await;
                         if let Ok(Ok(v)) = read {
                             if let Some(&pct) = v.first() {
