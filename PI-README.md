@@ -100,6 +100,11 @@ phone or PC on the same network. Change the port with `web_port` in
 `config_six.json`, or set it to 0 to turn it off. There is no password, so
 anyone on your network can use it.
 
+Each card shows the puck's printed ID, battery level and updates per second
+(50 is full speed). Tap the "Tap to name" line on a card to give the puck a
+name such as "Left ankle": pick one from the list or type your own. Names are
+saved in `config_six.json`.
+
 The page also lets you change the PC's address: tap the "SlimeVR PC: ..." line
 at the top, type the new IP with the on-page keypad, and Save. It is written to
 `config_six.json` and any running pucks reconnect briefly to use it.
