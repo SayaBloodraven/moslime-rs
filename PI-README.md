@@ -113,10 +113,11 @@ Turn on console auto-login (`sudo raspi-config` -> System Options -> Boot / Auto
 Login -> Console Autologin), then add this to the end of `~/.bash_profile`:
 
     if [ -z "${DISPLAY:-}" ] && [ "$(tty)" = /dev/tty1 ]; then
-      exec startx /usr/bin/chromium --kiosk --noerrdialogs --disable-infobars --no-first-run "http://localhost:8080/?kiosk=1" -- -nocursor
+      exec startx /usr/bin/chromium --kiosk --noerrdialogs --disable-infobars --no-first-run "http://localhost:8080/?kiosk=1" -- -nocursor -s 0 -dpms
     fi
 
-`-nocursor` is what hides the mouse pointer. (A Wayland kiosk with `cage` also
+`-nocursor` is what hides the mouse pointer; `-s 0 -dpms` stop the screen from
+going black after ten minutes. (A Wayland kiosk with `cage` also
 works but kept showing a stuck pointer in the middle of a touch-only screen.)
 
 The bridge itself still runs from systemd (`moslime.service`). Don't also enable

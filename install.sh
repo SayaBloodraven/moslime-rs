@@ -185,12 +185,16 @@ if [ "$KIOSK" -eq 1 ]; then
 
 # moslime kiosk: on the Pi's own screen (tty1) show the control page full-screen
 # (a plain X server with -nocursor: the Wayland "cage" kiosk kept drawing a
-# stuck mouse pointer in the middle of a touch-only screen)
+# stuck mouse pointer in the middle of a touch-only screen; -s 0 -dpms keep the
+# screen from blanking)
 if [ -z "${DISPLAY:-}" ] && [ "$(tty)" = /dev/tty1 ]; then
   until wget -q -O /dev/null http://localhost:8080/api/status; do sleep 1; done
-  exec startx /usr/bin/chromium --kiosk --noerrdialogs --disable-infobars --no-first-run "http://localhost:8080/?kiosk=1" -- -nocursor
+  exec startx /usr/bin/chromium --kiosk --noerrdialogs --disable-infobars --no-first-run "http://localhost:8080/?kiosk=1" -- -nocursor -s 0 -dpms
 fi
 KIOSKRC
+  elif ! grep -q -- "-nocursor -s 0 -dpms" "$PROFILE"; then
+    # Kiosk from an earlier install: stop the screen from blanking after 10 minutes.
+    sed -i 's/ -- -nocursor$/ -- -nocursor -s 0 -dpms/' "$PROFILE"
   fi
 fi
 
