@@ -538,6 +538,24 @@ async fn stream(
             let _ = p.subscribe(bc).await;
         }
     }
+    // Debug: also listen on every other channel the puck can notify on
+    // (before the start command, so a reply to it is caught too). Whatever
+    // arrives is logged as "raw: other". Nothing extra is sent to the puck.
+    if debug_frames() {
+        for c in p.characteristics() {
+            let can = c.properties.contains(CharPropFlags::NOTIFY)
+                || c.properties.contains(CharPropFlags::INDICATE);
+            if can && c.uuid != DATA_CHAR_UUID && c.uuid != BATTERY_CHAR_UUID {
+                let r = tokio::time::timeout(Duration::from_secs(3), p.subscribe(&c)).await;
+                let how = match r {
+                    Ok(Ok(())) => "ok".to_string(),
+                    Ok(Err(e)) => format!("failed: {e}"),
+                    Err(_) => "timed out".to_string(),
+                };
+                eprintln!("[tracker #{}] raw: listening on {} {}", ctx.sensor_id as usize + 1, c.uuid, how);
+            }
+        }
+    }
     let write_type = if cmd_char.properties.contains(CharPropFlags::WRITE) {
         WriteType::WithResponse
     } else {
